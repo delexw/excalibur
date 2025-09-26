@@ -37,10 +37,62 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ANSI, ConversationLogger } from './logger.js';
 
+// ----- Signal handling for graceful shutdown --------------------------------
+const activeProcesses = new Set();
+
+function gracefulShutdown(signal) {
+  console.log(`\nReceived ${signal}. Terminating active processes...`);
+  for (const child of activeProcesses) {
+    if (!child.killed) {
+      child.kill('SIGTERM');
+    }
+  }
+  process.exit(0);
+}
+
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+
 // ----- CLI argument parsing -------------------------------------------------
 const argv = process.argv.slice(2);
+
+// Show help if requested
+if (argv.includes('-h') || argv.includes('--help')) {
+  console.log(`⚔️  Excalibur CLI - Multi-agent orchestration with debate and consensus
+
+USAGE:
+  excalibur "Your question here" [options]
+  node index.js "Your question here" [options]
+
+OPTIONS:
+  --maxRounds=N         Maximum rounds of critique/vote cycles (default: 5)
+  --consensus=MODE      Consensus mode: unanimous|super|majority (default: super)
+  --preset=NAME         Apply preset: strict|default|fast|experiment|team
+  --unanimousPct=X      Override unanimous threshold (0-1, default: 0.75)
+  --superMajorityPct=X  Override super majority threshold (0-1, default: 0.75)
+  --majorityPct=X       Override majority threshold (0-1, default: 0.5)
+  --allow-blockers      Allow consensus even with unresolved blocker critiques
+  --rubberPenalty=X     Penalty weight for rubber-stamping agents (0-1, default: 0.5)
+  --owner=ID1,ID2,...   Require one or more agents to approve the winner
+  --ownerMin=X          Minimum score required from owners (default: 0.8)
+  --ownerMode=any|all   Require any or all owners to approve (default: any)
+  --logDir=DIR          Directory for session logs (default: "logs")
+  --sessionTag=TAG      Custom tag for this session
+  --quiet               Suppress console output (still writes logs)
+  --no-color            Disable ANSI color output
+  -h, --help            Show this help message
+
+EXAMPLES:
+  excalibur "How to optimize database queries?" --preset=team --maxRounds=3
+  excalibur "Design a REST API" --consensus=unanimous --owner=claude,gemini
+
+For more information, see: https://github.com/delexw/excalibur`);
+  process.exit(0);
+}
+
 if (!argv.length) {
-  console.error('Usage: node index.js "Your question" [--maxRounds=N] [--consensus=super] ...');
+  console.error('Usage: excalibur "Your question" [options]');
+  console.error('Use -h or --help for detailed usage information.');
   process.exit(1);
 }
 
@@ -183,6 +235,7 @@ async function spawnAgent(agent, prompt, timeoutSec) {
     let child;
     try {
       child = spawn(agent.cmd, args, { stdio: ['pipe', 'pipe', 'pipe'] });
+      activeProcesses.add(child);
     } catch (err) {
       // Failed to spawn (e.g. command not found). Resolve immediately
       resolve({ ok: false, error: `Failed to spawn ${agent.cmd}: ${err.message}` });
@@ -198,10 +251,12 @@ async function spawnAgent(agent, prompt, timeoutSec) {
     // Handle spawn error events
     child.on('error', err => {
       clearTimeout(timer);
+      activeProcesses.delete(child);
       resolve({ ok: false, error: `Spawn error: ${err.message}` });
     });
     child.on('close', code => {
       clearTimeout(timer);
+      activeProcesses.delete(child);
       if (code !== 0 && !stdout.trim()) {
         resolve({ ok: false, error: `Exited with code ${code}: ${stderr}` });
       } else {
