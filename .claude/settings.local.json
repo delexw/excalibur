@@ -4,7 +4,9 @@
       "Bash(git remote add:*)",
       "Bash(git init:*)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(excalibur:*)"
     ],
     "deny": [],
     "ask": []
