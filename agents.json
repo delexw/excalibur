@@ -1,0 +1,46 @@
+[
+  {
+    "id": "claude",
+    "displayName": "Claude CLI",
+    "cmd": "claude",
+    "args": [],
+    "inputMode": "stdin",
+    "supportsSystemPrefix": true,
+    "timeoutMs": 45000,
+    "avatar": "🦉",
+    "color": "cyan"
+  },
+  {
+    "id": "gemini",
+    "displayName": "Gemini CLI",
+    "cmd": "gemini",
+    "args": ["-p", "{PROMPT}"],
+    "inputMode": "arg",
+    "supportsSystemPrefix": true,
+    "timeoutMs": 45000,
+    "avatar": "🔷",
+    "color": "magenta"
+  },
+  {
+    "id": "cursor-agent",
+    "displayName": "Cursor CLI",
+    "cmd": "cursor",
+    "args": ["{PROMPT}"],
+    "inputMode": "arg",
+    "supportsSystemPrefix": false,
+    "timeoutMs": 45000,
+    "avatar": "🧭",
+    "color": "yellow"
+  },
+  {
+    "id": "codex",
+    "displayName": "Codex CLI",
+    "cmd": "codex",
+    "args": ["{PROMPT}"],
+    "inputMode": "arg",
+    "supportsSystemPrefix": true,
+    "timeoutMs": 45000,
+    "avatar": "🧠",
+    "color": "green"
+  }
+]

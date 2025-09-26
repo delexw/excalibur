@@ -1,0 +1,21 @@
+{
+  "name": "excalibur",
+  "version": "1.0.0",
+  "description": "Multi-agent orchestration CLI with debate, critique, voting and consensus",
+  "main": "index.js",
+  "bin": {
+    "excalibur": "./index.js"
+  },
+  "type": "module",
+  "keywords": ["ai", "cli", "orchestration", "debate", "consensus"],
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "index.js",
+    "logger.js",
+    "agents.json",
+    "prompts/",
+    "README.md"
+  ]
+}
