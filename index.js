@@ -200,6 +200,55 @@ const OWNER = {
 // ----- Helpers -------------------------------------------------------------
 // Extract the JSON body from agent output by trimming to outer braces
 function normalizeJsonText(txt) {
+  // Handle different agent output formats
+  // For Codex - extract content between timestamp "codex" line and "tokens used" lines
+  // Handle Codex FIRST before other formats
+  if (txt.includes('OpenAI Codex') || /\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\]\s+codex/.test(txt)) {
+    const lines = txt.split('\n');
+    let codexLineIdx = -1;
+    let tokensLineIdx = -1;
+
+    // Find the line that contains timestamp + "codex" (e.g., "[2025-09-26T10:33:45] codex")
+    for (let i = 0; i < lines.length; i++) {
+      if (/\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\]\s+codex/.test(lines[i])) {
+        codexLineIdx = i;
+        break;
+      }
+    }
+
+    // Find the line that contains "tokens used" after the codex line
+    if (codexLineIdx >= 0) {
+      for (let i = codexLineIdx + 1; i < lines.length; i++) {
+        if (lines[i].includes('tokens used')) {
+          tokensLineIdx = i;
+          break;
+        }
+      }
+    }
+
+    // Extract content between these two lines
+    if (codexLineIdx >= 0 && tokensLineIdx > codexLineIdx) {
+      const contentLines = lines.slice(codexLineIdx + 1, tokensLineIdx);
+      const nonEmptyLines = contentLines.filter(line => line.trim().length > 0);
+
+      if (nonEmptyLines.length > 0) {
+        // Join lines and remove extra whitespace to get clean JSON
+        txt = nonEmptyLines.join(' ').replace(/\s+/g, ' ').trim();
+      }
+    }
+    return txt; // Return early for Codex to avoid other processing
+  }
+
+  // For Gemini - strip markdown code blocks
+  if (txt.includes('```json')) {
+    const jsonStart = txt.indexOf('```json') + 7;
+    const jsonEnd = txt.indexOf('```', jsonStart);
+    if (jsonEnd > jsonStart) {
+      txt = txt.slice(jsonStart, jsonEnd).trim();
+    }
+  }
+
+  // Standard JSON extraction
   const first = txt.indexOf('{');
   const last = txt.lastIndexOf('}');
   if (first >= 0 && last > first) {
@@ -261,9 +310,12 @@ async function spawnAgent(agent, prompt, timeoutSec) {
         resolve({ ok: false, error: `Exited with code ${code}: ${stderr}` });
       } else {
         try {
-          const json = JSON.parse(normalizeJsonText(stdout));
+          const normalizedJsonText = normalizeJsonText(stdout);
+          const json = JSON.parse(normalizedJsonText);
+          LOGGER.line(agent, 'json:normalized', normalizedJsonText);
           resolve({ ok: true, json, raw: stdout });
-        } catch {
+        } catch (parseErr) {
+          console.error(stdout);
           resolve({ ok: false, error: 'Non‑JSON or parse error', raw: stdout });
         }
       }
@@ -285,7 +337,7 @@ async function roundPropose(agents, question) {
       LOGGER.line(agent, 'error', res.error || 'Unknown error');
       return { agentId: agent.id, error: res.error, raw: res.raw };
     }
-    LOGGER.line(agent, 'proposal', (res.json.proposal || res.json.answer || 'JSON received').slice(0, 400));
+    LOGGER.line(agent, 'proposal', (res.json.proposal || res.json.answer || 'JSON received'));
     return { agentId: agent.id, res };
   }));
 }

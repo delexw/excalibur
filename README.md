@@ -2,7 +2,7 @@
 
 **Excalibur CLI** (Chinese: **圆桌骑士 CLI**) coordinates a panel of agents like the legendary knights at a round table.  It provides a multi‑agent orchestration engine with debate, critique, voting and consensus.
 
-This project contains a Node.js script that orchestrates multiple AI model CLI processes into a structured debate.  It can be used to run several language model backends (e.g. Claude, Gemini, Cursor, Codex) against a single question, let them propose solutions, critique each other, vote and synthesise a final answer.
+This project contains a Node.js script that orchestrates multiple AI model CLI processes into a structured debate.  It can be used to run several language model backends (e.g. Claude, Gemini, Codex) against a single question, let them propose solutions, critique each other, vote and synthesise a final answer.
 
 ## Features
 
@@ -16,7 +16,7 @@ This project contains a Node.js script that orchestrates multiple AI model CLI p
 ## Requirements
 
 - Node.js ≥ 18 (for ECMAScript modules and `import` syntax)
-- Each agent CLI you wish to orchestrate must be installed and runnable on your system.  The sample `agents.json` file includes four placeholder definitions for **Claude**, **Gemini**, **Cursor** and **Codex**; adjust `cmd`/`args` to suit your local executables.
+- Each agent CLI you wish to orchestrate must be installed and runnable on your system.  The sample `agents.json` file includes four placeholder definitions for **Claude**, **Gemini** and **Codex**; adjust `cmd`/`args` to suit your local executables.
 
 ## Usage
 
