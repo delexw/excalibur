@@ -71,4 +71,4 @@ Uses only built-in Node modules. Customize prompts in `prompts/*.md` files witho
 
 ## License
 
-This project is provided as-is without warranty. Use and modify at your own risk.
+MIT License - see [LICENSE](LICENSE) file for details.
