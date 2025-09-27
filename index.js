@@ -36,9 +36,16 @@ import path from 'node:path';
 // Additional imports to support file resolution and external helpers
 import { fileURLToPath } from 'node:url';
 import { ANSI, ConversationLogger } from './logger.js';
+import { InteractiveTerminal, LogoRenderer, CommandParser, TerminalDisplay, SessionManager } from './interactive.js';
 
 // ----- Signal handling for graceful shutdown --------------------------------
 const activeProcesses = new Set();
+
+// Make activeProcesses globally accessible for interactive mode
+global.activeProcesses = activeProcesses;
+
+// Global flag to signal orchestration interruption
+global.orchestrationInterrupted = false;
 
 function gracefulShutdown(signal) {
   console.log(`\nReceived ${signal}. Terminating active processes...`);
@@ -61,8 +68,9 @@ if (argv.includes('-h') || argv.includes('--help')) {
   console.log(`⚔️  Excalibur CLI - Multi-agent orchestration with debate and consensus
 
 USAGE:
-  excalibur "Your question here" [options]
-  node index.js "Your question here" [options]
+  excalibur                          (interactive mode - default)
+  excalibur "Your question" [options] (direct mode)
+  node index.js "Your question" [options]
 
 OPTIONS:
   --maxRounds=N         Maximum rounds of critique/vote cycles (default: 5)
@@ -80,21 +88,20 @@ OPTIONS:
   --sessionTag=TAG      Custom tag for this session
   --quiet               Suppress console output (still writes logs)
   --no-color            Disable ANSI color output
+  --interactive         Start interactive terminal mode
   -h, --help            Show this help message
 
 EXAMPLES:
+  excalibur                                      (starts interactive mode)
   excalibur "How to optimize database queries?" --preset=team --maxRounds=3
   excalibur "Design a REST API" --consensus=unanimous --owner=claude,gemini
+  excalibur "Explain async/await" --preset=fast
 
 For more information, see: https://github.com/delexw/excalibur`);
   process.exit(0);
 }
 
-if (!argv.length) {
-  console.error('Usage: excalibur "Your question" [options]');
-  console.error('Use -h or --help for detailed usage information.');
-  process.exit(1);
-}
+// No longer exit if no arguments - interactive mode is now default
 
 // Helper to pick the first non‑flag argument as the user question
 const userQuestion = argv.find(a => !a.startsWith('--'));
@@ -132,12 +139,46 @@ const PROMPT_DIR = path.join(__dirname, 'prompts');
 const PROMPTS = {
   propose: fs.readFileSync(path.join(PROMPT_DIR, 'propose.md'), 'utf8').trim(),
   critique: fs.readFileSync(path.join(PROMPT_DIR, 'critique.md'), 'utf8').trim(),
+  revise: fs.readFileSync(path.join(PROMPT_DIR, 'revise.md'), 'utf8').trim(),
   vote: fs.readFileSync(path.join(PROMPT_DIR, 'vote.md'), 'utf8').trim(),
 };
 
 // Colour wrapper helpers using imported ANSI and the noColor flag
 const paint = (txt, colour) => ANSI.paint(txt, colour, LOG.noColor);
 const boldify = (txt) => ANSI.boldify(txt, LOG.noColor);
+
+// Helper to highlight conversation patterns with agent-aligned colors
+function highlightConversation(text, agents, noColor = LOG.noColor) {
+  if (noColor) return text;
+
+  // Highlight @mentions and align "You are absolutely right" with target agent's color
+  if (agents) {
+    for (const agent of agents) {
+      const displayName = agent.displayName || agent.id;
+      const agentColor = agent.color || 'white';
+
+      // Highlight @mentions using the mentioned agent's color
+      const mentionPattern = new RegExp(`(@${displayName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'g');
+      text = text.replace(mentionPattern, ANSI.paint('$1', agentColor, noColor));
+
+      // Highlight "You are absolutely right" or "you are absolutely right" when addressing this agent
+      const rightPattern = new RegExp(`(@${displayName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[^.]*?)([Yy]ou are absolutely right)`, 'g');
+      text = text.replace(rightPattern, (match, prefix, phrase) =>
+        prefix + ANSI.boldify(ANSI.paint(phrase, agentColor, noColor), noColor)
+      );
+
+      // Highlight "However, I disagree with" or "however, I disagree with" when addressing this agent
+      const disagreePattern = new RegExp(`(@${displayName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[^.]*?)([Hh]owever, I disagree with)`, 'g');
+      text = text.replace(disagreePattern, (match, prefix, phrase) =>
+        prefix + ANSI.boldify(ANSI.paint(phrase, agentColor, noColor), noColor)
+      );
+    }
+  }
+
+
+
+  return text;
+}
 
 // Global conversation logger instantiation with colour and quiet options
 const LOGGER = new ConversationLogger(LOG.dir, LOG.session, { noColor: LOG.noColor, quiet: LOG.quiet });
@@ -198,19 +239,17 @@ const OWNER = {
 
 
 // ----- Helpers -------------------------------------------------------------
-// Extract the JSON body from agent output by trimming to outer braces
+// Extract the JSON body from agent output using format-specific approach
 function normalizeJsonText(txt) {
-  // Handle different agent output formats
-  // For Codex - extract content between timestamp "codex" line and "tokens used" lines
-  // Handle Codex FIRST before other formats
-  if (txt.includes('OpenAI Codex') || /\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\]\s+codex/.test(txt)) {
+  // Handle Codex FIRST - extract content between [timestamp] codex and [timestamp] tokens used
+  if (txt.includes('OpenAI Codex') || /\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\]\s*codex/.test(txt)) {
     const lines = txt.split('\n');
     let codexLineIdx = -1;
     let tokensLineIdx = -1;
 
-    // Find the line that contains timestamp + "codex" (e.g., "[2025-09-26T10:33:45] codex")
+    // Find the line that contains timestamp + "codex"
     for (let i = 0; i < lines.length; i++) {
-      if (/\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\]\s+codex/.test(lines[i])) {
+      if (/\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\]\s*codex/.test(lines[i])) {
         codexLineIdx = i;
         break;
       }
@@ -226,20 +265,39 @@ function normalizeJsonText(txt) {
       }
     }
 
-    // Extract content between these two lines
+    // Extract content between these two lines, filtering out empty lines
     if (codexLineIdx >= 0 && tokensLineIdx > codexLineIdx) {
-      const contentLines = lines.slice(codexLineIdx + 1, tokensLineIdx);
-      const nonEmptyLines = contentLines.filter(line => line.trim().length > 0);
-
-      if (nonEmptyLines.length > 0) {
-        // Join lines and remove extra whitespace to get clean JSON
-        txt = nonEmptyLines.join(' ').replace(/\s+/g, ' ').trim();
-      }
+      const contentLines = lines.slice(codexLineIdx + 1, tokensLineIdx).filter(line => line.trim() !== '');
+      txt = contentLines.join('\n').trim();
+    } else if (codexLineIdx >= 0) {
+      // If no tokens line found, take everything after codex line
+      const contentLines = lines.slice(codexLineIdx + 1).filter(line => line.trim() !== '');
+      txt = contentLines.join('\n').trim();
     }
-    return txt; // Return early for Codex to avoid other processing
+
+    // For Codex, try to validate the extracted JSON immediately
+    try {
+      JSON.parse(txt);
+      return txt;
+    } catch (e) {
+      // If JSON parsing fails, try to find just the outermost braces
+      const first = txt.indexOf('{');
+      const last = txt.lastIndexOf('}');
+      if (first >= 0 && last > first) {
+        const candidate = txt.slice(first, last + 1);
+        try {
+          JSON.parse(candidate);
+          return candidate;
+        } catch (e2) {
+          // If that fails too, return the original extracted text
+          return txt;
+        }
+      }
+      return txt;
+    }
   }
 
-  // For Gemini - strip markdown code blocks
+  // Handle Gemini - remove markdown code blocks if present
   if (txt.includes('```json')) {
     const jsonStart = txt.indexOf('```json') + 7;
     const jsonEnd = txt.indexOf('```', jsonStart);
@@ -248,12 +306,25 @@ function normalizeJsonText(txt) {
     }
   }
 
-  // Standard JSON extraction
+  // Generic fallback - find the outermost JSON object
   const first = txt.indexOf('{');
   const last = txt.lastIndexOf('}');
+
   if (first >= 0 && last > first) {
-    return txt.slice(first, last + 1).trim();
+    // Extract content between first { and last }
+    const jsonCandidate = txt.slice(first, last + 1).trim();
+
+    // Validate it's proper JSON by trying to parse
+    try {
+      JSON.parse(jsonCandidate);
+      return jsonCandidate;
+    } catch (e) {
+      // If parsing fails, fall back to original text
+      return txt.trim();
+    }
   }
+
+  // If no braces found, return original text
   return txt.trim();
 }
 
@@ -277,13 +348,19 @@ function loadAgents() {
   }));
 }
 
-// Spawn an agent CLI process with prompt; return JSON output or error
-async function spawnAgent(agent, prompt, timeoutSec) {
+// Spawn an agent CLI process with prompt; return JSON output or error (single attempt)
+async function spawnAgentOnce(agent, prompt, timeoutSec) {
   return new Promise((resolve) => {
     const args = (agent.args || []).map(a => a.replace('{PROMPT}', prompt));
     let child;
     try {
-      child = spawn(agent.cmd, args, { stdio: ['pipe', 'pipe', 'pipe'] });
+      child = spawn(agent.cmd, args, {
+        stdio: ['inherit', 'pipe', 'pipe'],
+        env: {
+          ...process.env,
+          ANTHROPIC_API_KEY: '',
+        }
+      });
       activeProcesses.add(child);
     } catch (err) {
       // Failed to spawn (e.g. command not found). Resolve immediately
@@ -292,9 +369,11 @@ async function spawnAgent(agent, prompt, timeoutSec) {
     }
     let stdout = '';
     let stderr = '';
+    let wasKilledByTimeout = false;
     const timer = setTimeout(() => {
+      wasKilledByTimeout = true;
       child.kill('SIGKILL');
-    }, Math.min(agent.timeoutMs || timeoutSec * 1000, timeoutSec * 1000));
+    }, Math.max(agent.timeoutMs || timeoutSec * 1000, timeoutSec * 1000));
     child.stdout.on('data', d => { stdout += d.toString(); });
     child.stderr.on('data', d => { stderr += d.toString(); });
     // Handle spawn error events
@@ -306,38 +385,77 @@ async function spawnAgent(agent, prompt, timeoutSec) {
     child.on('close', code => {
       clearTimeout(timer);
       activeProcesses.delete(child);
-      if (code !== 0 && !stdout.trim()) {
+      if (wasKilledByTimeout) {
+        const timeoutMs = Math.max(agent.timeoutMs || timeoutSec * 1000, timeoutSec * 1000);
+        resolve({ ok: false, error: `Process killed by timeout after ${timeoutMs}ms` });
+      } else if (code !== 0 && !stdout.trim()) {
         resolve({ ok: false, error: `Exited with code ${code}: ${stderr}` });
       } else {
         try {
           const normalizedJsonText = normalizeJsonText(stdout);
           const json = JSON.parse(normalizedJsonText);
-          LOGGER.line(agent, 'json:normalized', normalizedJsonText);
+          LOGGER.line(agent, 'json:normalized', normalizedJsonText, true); // fileOnly = true
           resolve({ ok: true, json, raw: stdout });
         } catch (parseErr) {
-          console.error(stdout);
-          resolve({ ok: false, error: 'Non‑JSON or parse error', raw: stdout });
+          console.error(parseErr);
+          resolve({ ok: false, error: 'Non‑JSON or parse error', raw: parseErr });
         }
       }
     });
-    if ((agent.inputMode || 'stdin') === 'stdin') {
-      child.stdin.write(prompt);
-      child.stdin.end();
-    }
+    // With stdio: ['inherit', 'pipe', 'inherit'], stdin is inherited from parent
+    // All agents should use 'arg' inputMode, not 'stdin'
   });
+}
+
+// Spawn an agent CLI process with retry logic for failed attempts
+async function spawnAgent(agent, prompt, timeoutSec) {
+  const maxRetries = 3; // Retry Claude CLI calls, others once only
+  const baseDelay = 1000; // 1 second base delay
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    const result = await spawnAgentOnce(agent, prompt, timeoutSec);
+
+    if (result.ok) {
+      if (attempt > 1) {
+        LOGGER.line(agent, 'retry:success', `Succeeded on attempt ${attempt}/${maxRetries}`, true);
+      }
+      return result;
+    }
+
+    // Don't retry on parse errors or command not found
+    if (result.error?.includes('Non‑JSON or parse error') ||
+        result.error?.includes('Failed to spawn')) {
+      return result;
+    }
+
+    // Log retry attempt
+    if (attempt < maxRetries) {
+      const delay = baseDelay * attempt; // Progressive delay: 1s, 2s, 3s
+      LOGGER.line(agent, 'retry:attempt', `Attempt ${attempt}/${maxRetries} failed: ${result.error}. Retrying in ${delay}ms`, true);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    } else {
+      LOGGER.line(agent, 'retry:exhausted', `All ${maxRetries} attempts failed. Final error: ${result.error}`);
+    }
+  }
+
+  // Return the last failed result
+  return await spawnAgentOnce(agent, prompt, timeoutSec);
 }
 
 // Round: proposals — run propose prompt for each agent
 async function roundPropose(agents, question) {
   return Promise.all(agents.map(async (agent) => {
     const prompt = buildPrompt(PROMPTS.propose, question);
-    LOGGER.line(agent, 'prompt:propose', 'Sent proposal prompt');
+    LOGGER.line(agent, 'prompt:propose', 'Sent proposal prompt', true); // fileOnly = true
     const res = await spawnAgent(agent, prompt, 60);
     if (!res.ok) {
       LOGGER.line(agent, 'error', res.error || 'Unknown error');
       return { agentId: agent.id, error: res.error, raw: res.raw };
     }
-    LOGGER.line(agent, 'proposal', (res.json.proposal || res.json.answer || 'JSON received'));
+    const proposal = res.json.proposal || res.json.answer || 'No proposal provided';
+    const confidence = res.json.confidence ? ` I'm ${res.json.confidence} confident about this.` : '';
+    const summary = proposal.length > 150 ? proposal.slice(0, 150) + '...' : proposal;
+    LOGGER.line(agent, 'proposal', `My proposal: ${summary}${confidence}`);
     return { agentId: agent.id, res };
   }));
 }
@@ -349,15 +467,115 @@ async function roundCritique(agents, question, current) {
     const orig = current.find(p => p.agentId === agent.id)?.payload || {};
     const context = { ...extras, your_original: orig };
     const prompt = buildPrompt(PROMPTS.critique, question, context);
-    LOGGER.line(agent, 'prompt:critique', 'Sent critique prompt with peers');
+    LOGGER.line(agent, 'prompt:critique', 'Sent critique prompt with peers', true); // fileOnly = true
     const res = await spawnAgent(agent, prompt, 60);
     if (!res.ok) {
       LOGGER.line(agent, 'error', res.error || 'Unknown error');
       return { agentId: agent.id, error: res.error, raw: res.raw };
     }
-    const nCrit = (res.json.critiques || []).length;
-    const nBlock = (res.json.critiques || []).filter(c => c.severity === 'blocker').length;
-    LOGGER.line(agent, 'critique', `critiques=${nCrit}, blockers=${nBlock}`);
+    const critiques = res.json.critiques || [];
+    const nCrit = critiques.length;
+
+    if (nCrit > 0) {
+      // Use conversation messages directly from JSON response with highlighting
+      for (const c of critiques) {
+        const conversationMsg = c.conversation_message;
+        if (conversationMsg) {
+          LOGGER.line(agent, 'critique', highlightConversation(conversationMsg, agents));
+        } else {
+          // Fallback if no conversation message provided
+          const target = c.target_agent;
+          const severity = c.severity;
+          const issue = c.claim_or_line || 'your approach';
+          const fallbackMsg = `@${target}, I have a ${severity} concern about ${issue}.`;
+          LOGGER.line(agent, 'critique', highlightConversation(fallbackMsg, agents));
+        }
+      }
+    } else {
+      LOGGER.line(agent, 'critique', 'The current proposals look solid to me.');
+    }
+    return { agentId: agent.id, res };
+  }));
+}
+
+// Round: revise — each agent updates their proposal based on received feedback
+async function roundRevise(agents, question, current, critiques) {
+  // Collect feedback for each agent
+  const feedbackByAgent = new Map();
+  for (const crit of critiques.filter(c => c.res && c.res.ok)) {
+    for (const critique of (crit.res.json.critiques || [])) {
+      const target = critique.target_agent;
+      if (!feedbackByAgent.has(target)) {
+        feedbackByAgent.set(target, []);
+      }
+      feedbackByAgent.get(target).push({
+        from_agent: crit.agentId,
+        severity: critique.severity,
+        issue: critique.claim_or_line,
+        rationale: critique.rationale,
+        suggested_fix: critique.suggested_fix
+      });
+    }
+  }
+
+  return Promise.all(agents.map(async (agent) => {
+    const feedback = feedbackByAgent.get(agent.id) || [];
+    const originalProposal = current.find(p => p.agentId === agent.id)?.payload || {};
+
+    if (feedback.length === 0) {
+      LOGGER.line(agent, 'revision', 'No feedback received, keeping original proposal.');
+      return { agentId: agent.id, res: { ok: true, json: { revised: originalProposal } } };
+    }
+
+    const context = {
+      your_original_proposal: originalProposal,
+      feedback_received: feedback
+    };
+    const prompt = buildPrompt(PROMPTS.revise, question, context);
+    LOGGER.line(agent, 'prompt:revise', 'Sent revision prompt with peer feedback', true); // fileOnly = true
+    const res = await spawnAgent(agent, prompt, 60);
+
+    if (!res.ok) {
+      LOGGER.line(agent, 'error', res.error || 'Unknown error');
+      return { agentId: agent.id, error: res.error, raw: res.raw };
+    }
+
+    const revised = res.json.revised;
+    const responses = res.json.response_to_feedback || [];
+
+    // Use conversation messages directly from JSON response with highlighting
+    for (const response of responses) {
+      const conversationMsg = response.conversation_message;
+      if (conversationMsg) {
+        LOGGER.line(agent, 'revision', highlightConversation(conversationMsg, agents));
+      } else {
+        // Fallback if no conversation message provided
+        const critic = response.critic_agent;
+        const action = response.action_taken || 'unknown';
+        if (action === 'revised') {
+          const fallbackMsg = `@${critic}, thanks for your suggestions! I've made some adjustments.`;
+          LOGGER.line(agent, 'revision', highlightConversation(fallbackMsg, agents));
+        } else {
+          const fallbackMsg = `@${critic}, I appreciate your input, but I believe my original approach is best.`;
+          LOGGER.line(agent, 'revision', highlightConversation(fallbackMsg, agents));
+        }
+      }
+    }
+
+    // Summary message
+    if (revised && revised.proposal && revised.proposal !== 'no change') {
+      const accepted = responses.filter(r => r.action_taken === 'revised' || r.feedback_accepted).length;
+      const rejected = responses.filter(r => r.action_taken === 'rejected' || r.feedback_rejected).length;
+
+      if (responses.length > 1) {
+        LOGGER.line(agent, 'revision', `Overall: Updated my proposal based on ${accepted} accepted suggestions.`);
+      }
+    } else {
+      if (responses.length > 1) {
+        LOGGER.line(agent, 'revision', 'Overall: Keeping my original proposal after reviewing all feedback.');
+      }
+    }
+
     return { agentId: agent.id, res };
   }));
 }
@@ -367,14 +585,54 @@ async function roundVote(agents, question, current) {
   const extras = { candidates: current.map(c => ({ agentId: c.agentId, payload: c.payload })) };
   return Promise.all(agents.map(async (agent) => {
     const prompt = buildPrompt(PROMPTS.vote, question, extras);
-    LOGGER.line(agent, 'prompt:vote', 'Sent vote prompt for candidates');
+    LOGGER.line(agent, 'prompt:vote', 'Sent vote prompt for candidates', true); // fileOnly = true
     const res = await spawnAgent(agent, prompt, 60);
     if (!res.ok) {
       LOGGER.line(agent, 'error', res.error || 'Unknown error');
       return { agentId: agent.id, error: res.error, raw: res.raw };
     }
-    const n = (res.json.scores || []).length;
-    LOGGER.line(agent, 'vote', `scored ${n} candidates`);
+    const conversationMsg = res.json.conversation_message;
+    if (conversationMsg) {
+      LOGGER.line(agent, 'vote', highlightConversation(conversationMsg, agents));
+    } else {
+      // Fallback if no conversation message provided
+      const scores = res.json.scores || [];
+      const blockers = res.json.blocking_issues || [];
+
+      if (scores.length > 0) {
+        const topScore = Math.max(...scores.map(s => s.score));
+        const topAgent = scores.find(s => s.score === topScore);
+        const scoresSummary = scores.map(s => `${s.agent_id} (${s.score.toFixed(2)})`).join(', ');
+
+        let message = `My ratings: ${scoresSummary}.`;
+        if (topAgent) {
+          message += ` I think ${topAgent.agent_id}'s proposal is strongest.`;
+        }
+
+        // Be specific about blocking concerns
+        if (blockers.length > 0) {
+          const blockersByAgent = new Map();
+          for (const blocker of blockers) {
+            if (!blockersByAgent.has(blocker.agent_id)) {
+              blockersByAgent.set(blocker.agent_id, []);
+            }
+            blockersByAgent.get(blocker.agent_id).push(blocker.issue);
+          }
+
+          const blockerMessages = [];
+          for (const [blockedAgent, issues] of blockersByAgent.entries()) {
+            const issueCount = issues.length;
+            blockerMessages.push(`${issueCount} blocker${issueCount > 1 ? 's' : ''} with ${blockedAgent}'s approach`);
+          }
+
+          message += ` However, I have ${blockerMessages.join(' and ')}.`;
+        }
+
+        LOGGER.line(agent, 'vote', highlightConversation(message, agents));
+      } else {
+        LOGGER.line(agent, 'vote', "I couldn't provide meaningful scores for the current proposals.");
+      }
+    }
     return { agentId: agent.id, res };
   }));
 }
@@ -468,19 +726,87 @@ function consensusReached(avg, mode) {
 
 // ----- Main execution ------------------------------------------------------
 (async function main() {
+  // Check for interactive mode - default when no question provided or explicit flag
+  const hasQuestion = userQuestion && userQuestion.trim();
+  const shouldUseInteractive = argv.includes('--interactive') || !hasQuestion;
+
+  if (shouldUseInteractive) {
+    const agents = loadAgents();
+
+    const interactive = new InteractiveTerminal({
+      logoRenderer: new LogoRenderer({ noColor: LOG.noColor }),
+      commandParser: new CommandParser(),
+      display: new TerminalDisplay({ noColor: LOG.noColor }),
+      sessionManager: new SessionManager()
+    });
+
+    // Set up question handler to run orchestration
+    interactive.setQuestionHandler(async (question, config) => {
+      // This will run the full orchestration for the question
+      const agents = loadAgents();
+      // Reset logger for new session
+      const sessionLogger = new ConversationLogger(LOG.dir,
+        `${LOG.session}-${Date.now()}`,
+        { noColor: LOG.noColor, quiet: LOG.quiet });
+
+      try {
+        // Run the full orchestration
+        await runOrchestration(question, agents, sessionLogger);
+        return { success: true };
+      } catch (error) {
+        console.error('Orchestration failed:', error);
+        return { success: false, error: error.message };
+      } finally {
+        // Logger is closed by runOrchestration
+      }
+    });
+
+    // Load agents for interactive session
+    interactive.sessionManager.setAgents(agents);
+
+    await interactive.start();
+    return;
+  }
+
+  // Non-interactive mode continues as before
   const agents = loadAgents();
+  await runOrchestration(userQuestion, agents, LOGGER);
+})(); // End of main async function
+
+// Extract orchestration logic into reusable function
+async function runOrchestration(userQuestion, agents, logger) {
+  // Reset interruption flag at the start
+  global.orchestrationInterrupted = false;
+
   // Display session configuration
-  LOGGER.blockTitle(`Session ${LOG.session} — ${agents.length} agents`);
+  logger.blockTitle(`Session ${LOG.session} — ${agents.length} agents`);
+
   if (!LOG.quiet) {
     const presetInfo = presetName ? `preset=${presetName} | ` : '';
     console.log(paint(`Owners: ${OWNER.ids.length ? OWNER.ids.join(', ') : 'none'} | ownerMin=${OWNER.minScore} | ownerMode=${OWNER.mode}\n`, 'gray'));
     console.log(paint(`Consensus=${consensusMode} | thresholds: U=${CONSENSUS.unanimousPct} S=${CONSENSUS.superMajorityPct} M=${CONSENSUS.majorityPct} | blockers=${CONSENSUS.requireNoBlockers ? 'strict' : 'allowed'} | rubberPenalty=${DELIB.weightPenaltyRubberStamp}\n`, 'gray'));
   }
   // Log the question
-  LOGGER.line({ id: 'orchestrator', avatar: '🗂️', displayName: 'Orchestrator', color: 'white' }, 'question', userQuestion);
+  logger.line({ id: 'orchestrator', avatar: '🗂️', displayName: 'Orchestrator', color: 'white' }, 'question', userQuestion);
+
+  // Show agents are thinking
+  for (const agent of agents) {
+    logger.line(agent, 'thinking', 'Analyzing the problem...');
+  }
+
+  // Add separator after thinking phase
+  console.log('');
 
   // Round 0: initial proposals
+  logger.blockTitle('Initial Proposals');
   const r0 = await roundPropose(agents, userQuestion);
+
+  // Check for interruption
+  if (global.orchestrationInterrupted) {
+    console.log('\n🛑 Orchestration interrupted by user.');
+    return;
+  }
+
   const okR0 = r0.filter(x => x.res && x.res.ok);
   if (!okR0.length) {
     console.error('No proposals received. Aborting.');
@@ -493,9 +819,25 @@ function consensusReached(avg, mode) {
 
   // Critique/vote rounds
   for (let round = 1; round <= maxRounds; round++) {
-    LOGGER.blockTitle(`Round ${round}: critiques & voting`);
+    logger.blockTitle(`Round ${round}: critiques & voting`);
+
+    // Show agents are thinking about critiques
+    for (const agent of agents) {
+      logger.line(agent, 'thinking', 'Reviewing peer proposals...');
+    }
+
+    // Add separator after thinking
+    console.log('');
+
     // Critique phase
     const crits = await roundCritique(agents, userQuestion, current);
+
+    // Check for interruption after critique
+    if (global.orchestrationInterrupted) {
+      console.log('\n🛑 Orchestration interrupted by user.');
+      return;
+    }
+
     const okCrits = crits.filter(x => x.res && x.res.ok);
     // Novelty check across all agents
     let totalNovel = 0;
@@ -504,14 +846,32 @@ function consensusReached(avg, mode) {
       totalNovel += novel;
       seenPairs = seen;
     }
-    // Apply revisions from critiques
-    for (const c of okCrits) {
-      const revised = c.res.json.revised;
+    // Revision phase - agents update their proposals based on feedback
+    console.log('');
+    for (const agent of agents) {
+      logger.line(agent, 'thinking', 'Considering peer feedback...');
+    }
+
+    // Add separator after thinking
+    console.log('');
+
+    const revisions = await roundRevise(agents, userQuestion, current, okCrits);
+    const okRevisions = revisions.filter(r => r.res && r.res.ok);
+
+    // Apply revisions to current proposals
+    for (const rev of okRevisions) {
+      const revised = rev.res.json.revised;
       if (revised && revised.proposal && revised.proposal !== 'no change') {
-        const idx = current.findIndex(x => x.agentId === c.agentId);
+        const idx = current.findIndex(x => x.agentId === rev.agentId);
         if (idx >= 0) current[idx].payload = revised;
       }
     }
+
+    // Show agents are thinking about votes
+    for (const agent of agents) {
+      LOGGER.line(agent, 'thinking', 'Scoring all proposals...');
+    }
+
     // Voting phase
     const votes = await roundVote(agents, userQuestion, current);
     const okVotes = votes.filter(v => v.res && v.res.ok);
@@ -560,13 +920,22 @@ function consensusReached(avg, mode) {
           avgPeerScore: undefined, // could be filled via raterScores
         };
       });
-      LOGGER.summary(scorecards);
-      LOGGER.end();
+      logger.summary(scorecards);
+      logger.end();
       return;
     }
   }
   // No consensus reached within maxRounds; fallback to best candidate
-  LOGGER.blockTitle('Max rounds reached — selecting highest scoring proposal');
+  logger.blockTitle('Max rounds reached — selecting highest scoring proposal');
+
+  // Show agents are thinking about final votes
+  for (const agent of agents) {
+    logger.line(agent, 'thinking', 'Making final evaluations...');
+  }
+
+  // Add separator after thinking
+  console.log('');
+
   // Recompute votes to show final ranking
   const finalVotes = await roundVote(agents, userQuestion, current);
   const okFinalVotes = finalVotes.filter(v => v.res && v.res.ok);
@@ -601,6 +970,6 @@ function consensusReached(avg, mode) {
     rubber: false,
     avgPeerScore: undefined,
   }));
-  LOGGER.summary(scorecards);
-  LOGGER.end();
-})();
+  logger.summary(scorecards);
+  logger.end();
+}

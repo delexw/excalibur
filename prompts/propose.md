@@ -12,6 +12,11 @@ If code changes are required, include a **unified diff** (git‑style) in the `c
 
 Return a single **strict JSON** object with the following fields.  The values in angle brackets (`<…>`) are placeholders that you should replace with your own content:
 
+**CRITICAL JSON RULES:**
+- All strings must use proper JSON escaping: `\"` for quotes, `\\` for backslashes, `\\n` for newlines
+- Use double backslashes for shell commands: `"\\copy"` not `"\copy"`
+- Example: `"psql -c \"\\\\copy table FROM 'file.csv'\""` (four backslashes become two in final JSON)
+
 ```json
 {
   "proposal": "<3–8 sentences or concise bullets>",

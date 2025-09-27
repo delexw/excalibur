@@ -48,22 +48,29 @@ export class ConversationLogger {
     }
     return this.streams.get(agentId);
   }
+
+
+
+
   /**
    * Write a log line on behalf of a particular agent.  The line is written to
    * the agent's file, the console (unless quiet) and recorded in the meta
    * transcript.  The phase describes the stage of the discussion (e.g.
    * "proposal", "critique").
    */
-  line(agent, phase, text) {
+  line(agent, phase, text, fileOnly = false) {
     const ts = new Date().toISOString();
     const stream = this.agentFile(agent.id);
     stream.write(`[${ts}] [${phase}] ${text}\n`);
-    if (!this.quiet) {
+
+    if (!this.quiet && !fileOnly) {
       const tag = `${agent.avatar || '🤖'} ${agent.displayName || agent.id}`;
       const phaseLabel = ANSI.boldify(ANSI.paint(`[${phase}]`, agent.color || 'white', this.noColor), this.noColor);
       const tagColour = ANSI.paint(tag, agent.color || 'white', this.noColor);
-      process.stdout.write(`${ANSI.paint('│', 'gray', this.noColor)} ${tagColour} ${phaseLabel} ${ANSI.paint('—', 'gray', this.noColor)} ${text}\n`);
+      // Move phase before agent name for better readability
+      process.stdout.write(`${ANSI.paint('│', 'gray', this.noColor)} ${phaseLabel} ${tagColour} ${ANSI.paint('—', 'gray', this.noColor)} ${text}\n`);
     }
+
     this.meta.events.push({ t: ts, agentId: agent.id, phase, text });
   }
   /**
@@ -75,7 +82,8 @@ export class ConversationLogger {
     if (this.quiet) return;
     const width = Math.max(8, Math.min(80, process.stdout.columns || 80) - 4);
     const line = '─'.repeat(width);
-    console.log(ANSI.paint(`\n┌${line}\n│ ${ANSI.boldify(title, this.noColor)}\n└${line}\n`, 'gray', this.noColor));
+    // Add more spacing and visual emphasis for better stage separation
+    console.log(ANSI.paint(`\n\n┌${line}┐\n│ ${ANSI.boldify(title, this.noColor)} │\n└${line}┘\n`, 'cyan', this.noColor));
   }
   /**
    * Generate a human‑readable transcript and a JSON meta file.  The report

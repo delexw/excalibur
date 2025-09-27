@@ -3,7 +3,7 @@
     "id": "claude",
     "displayName": "Claude CLI",
     "cmd": "claude",
-    "args": ["-p", "{PROMPT}"],
+    "args": ["-p", "{PROMPT}", "--dangerously-skip-permissions"],
     "inputMode": "arg",
     "supportsSystemPrefix": true,
     "timeoutMs": 300000,
