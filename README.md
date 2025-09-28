@@ -11,7 +11,7 @@
 ⚔️  EXCALIBUR CLI - Multi-Agent Orchestration Engine
 ```
 
-**Excalibur CLI** coordinates AI agents in structured debates to reach consensus on solutions. Features interactive terminal with Fate/Stay Night inspired colors.
+**Excalibur CLI** coordinates AI agents in structured debates to reach consensus on solutions. Features interactive terminal.
 
 ## Features
 
