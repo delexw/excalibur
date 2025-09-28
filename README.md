@@ -13,6 +13,8 @@
 
 **Excalibur CLI** coordinates AI agents in structured debates to reach consensus on solutions. Features interactive terminal.
 
+![Example](example.png)
+
 ## Features
 
 - **Interactive Terminal** — Live command filtering, tab completion, arrow navigation, ESC to kill agents
