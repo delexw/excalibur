@@ -22,17 +22,6 @@
     "color": "magenta"
   },
   {
-    "id": "gemini-flash",
-    "displayName": "Gemini CLI Flash",
-    "cmd": "gemini",
-    "args": ["-p", "{PROMPT}", "-m", "gemini-2.5-flash"],
-    "inputMode": "arg",
-    "supportsSystemPrefix": true,
-    "timeoutMs": 300000,
-    "avatar": "⚡",
-    "color": "yellow"
-  },
-  {
     "id": "codex",
     "displayName": "Codex CLI",
     "cmd": "codex",
@@ -42,16 +31,5 @@
     "timeoutMs": 300000,
     "avatar": "🧠",
     "color": "green"
-  },
-  {
-    "id": "qwen",
-    "displayName": "Qwen CLI",
-    "cmd": "qwen",
-    "args": ["-p", "{PROMPT}"],
-    "inputMode": "arg",
-    "supportsSystemPrefix": true,
-    "timeoutMs": 300000,
-    "avatar": "🌟",
-    "color": "blue"
   }
 ]
