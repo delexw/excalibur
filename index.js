@@ -541,6 +541,12 @@ async function spawnAgent(agent, prompt, timeoutSec) {
       if (attempt > 1) {
         LOGGER.line(agent, 'retry:success', `Succeeded on attempt ${attempt}/${maxRetries}`, true);
       }
+
+      // Log the response immediately for immediate output
+      const proposal = result.json.proposal || result.json.answer || 'No response provided';
+      const confidence = result.json.confidence ? ` I'm ${result.json.confidence} confident about this.` : '';
+      LOGGER.line(agent, 'response', `${proposal}${confidence}`);
+
       return result;
     }
 
@@ -582,10 +588,7 @@ async function roundPropose(agents, question) {
       }
       return { agentId: agent.id, error: res.error, raw: res.raw };
     }
-    const proposal = res.json.proposal || res.json.answer || 'No proposal provided';
-    const confidence = res.json.confidence ? ` I'm ${res.json.confidence} confident about this.` : '';
-    const summary = proposal.length > 150 ? proposal.slice(0, 150) + '...' : proposal;
-    LOGGER.line(agent, 'proposal', `My proposal: ${summary}${confidence}`);
+    // Response already logged in spawnAgent
     return { agentId: agent.id, res };
   });
 
