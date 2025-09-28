@@ -68,7 +68,7 @@ export class ConversationLogger {
       const phaseLabel = ANSI.boldify(ANSI.paint(`[${phase}]`, agent.color || 'white', this.noColor), this.noColor);
       const tagColour = ANSI.paint(tag, agent.color || 'white', this.noColor);
       // Move phase before agent name for better readability
-      process.stdout.write(`${ANSI.paint('│', 'gray', this.noColor)} ${phaseLabel} ${tagColour} ${ANSI.paint('—', 'gray', this.noColor)} ${text}\n`);
+      process.stdout.write(`${ANSI.paint('│', 'gray', this.noColor)} ${phaseLabel} ${tagColour} ${ANSI.paint('—', 'gray', this.noColor)} ${text}\n\n`);
     }
 
     this.meta.events.push({ t: ts, agentId: agent.id, phase, text });

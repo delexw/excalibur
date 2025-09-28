@@ -329,8 +329,77 @@ function normalizeJsonText(txt) {
 }
 
 // Build a prompt for an agent with optional context
-function buildPrompt(base, question, context = {}) {
-  return `${base}\n\nUSER QUESTION:\n${question}\n\nCONTEXT:\n${JSON.stringify(context, null, 2)}\n\nReturn JSON only.`;
+function buildPrompt(base, question, context = {}, agents = []) {
+  // Replace {{AGENTS}} placeholder with agent list
+  let prompt = base;
+  if (prompt.includes('{{AGENTS}}')) {
+    const agentList = agents.map(agent => `agent_id:${agent.id}, agent_display_name:@${agent.displayName}`).join(', ');
+    prompt = prompt.replace('{{AGENTS}}', agentList);
+  }
+
+  return `${prompt}\n\nUSER QUESTION:\n${question}\n\nCONTEXT:\n${JSON.stringify(context, null, 2)}\n\nReturn JSON only.`;
+}
+
+// Validate agents configuration
+function validateAgents(agents) {
+  const errors = [];
+  const seenIds = new Set();
+  const seenDisplayNames = new Set();
+
+  for (let i = 0; i < agents.length; i++) {
+    const agent = agents[i];
+    const prefix = `Agent ${i + 1}`;
+
+    // Check required fields
+    if (!agent.id || typeof agent.id !== 'string') {
+      errors.push(`${prefix}: missing or invalid 'id' field`);
+    }
+    if (!agent.displayName || typeof agent.displayName !== 'string') {
+      errors.push(`${prefix}: missing or invalid 'displayName' field`);
+    }
+    if (!agent.cmd || typeof agent.cmd !== 'string') {
+      errors.push(`${prefix}: missing or invalid 'cmd' field`);
+    }
+    if (!Array.isArray(agent.args)) {
+      errors.push(`${prefix}: 'args' must be an array`);
+    }
+
+    // Check for duplicates
+    if (agent.id) {
+      if (seenIds.has(agent.id)) {
+        errors.push(`${prefix}: duplicate agent id '${agent.id}'`);
+      } else {
+        seenIds.add(agent.id);
+      }
+    }
+
+    if (agent.displayName) {
+      if (seenDisplayNames.has(agent.displayName)) {
+        errors.push(`${prefix}: duplicate displayName '${agent.displayName}'`);
+      } else {
+        seenDisplayNames.add(agent.displayName);
+      }
+    }
+
+    // Check args contains {PROMPT} placeholder
+    if (Array.isArray(agent.args) && !agent.args.some(arg => arg.includes('{PROMPT}'))) {
+      errors.push(`${prefix}: 'args' array must contain '{PROMPT}' placeholder`);
+    }
+
+    // Validate optional numeric fields
+    if (agent.timeoutMs !== undefined && (!Number.isInteger(agent.timeoutMs) || agent.timeoutMs <= 0)) {
+      errors.push(`${prefix}: 'timeoutMs' must be a positive integer`);
+    }
+
+    // Validate optional string fields
+    if (agent.inputMode !== undefined && !['arg', 'stdin'].includes(agent.inputMode)) {
+      errors.push(`${prefix}: 'inputMode' must be 'arg' or 'stdin'`);
+    }
+  }
+
+  if (errors.length > 0) {
+    throw new Error(`agents.json validation failed:\n  ${errors.join('\n  ')}`);
+  }
 }
 
 // Load agents from agents.json, assigning default avatars/colours if missing
@@ -339,11 +408,13 @@ function loadAgents() {
   if (!fs.existsSync(agentsPath)) throw new Error('Missing agents.json');
   const list = JSON.parse(fs.readFileSync(agentsPath, 'utf8'));
   if (!Array.isArray(list) || list.length === 0) throw new Error('agents.json has no agents');
-  const palette = ['cyan','magenta','yellow','green','blue','red'];
-  const emojis  = ['🦉','🔷','🧭','🧠','🦊','🐙','🛰️','🛠️','🐺','🐍'];
-  return list.map((cfg, i) => ({
-    avatar: cfg.avatar || emojis[i % emojis.length],
-    color:  cfg.color  || palette[i % palette.length],
+
+  // Validate the configuration
+  validateAgents(list);
+
+  return list.map(cfg => ({
+    avatar: cfg.avatar || '🤖',
+    color:  cfg.color  || 'white',
     ...cfg,
   }));
 }
@@ -397,8 +468,7 @@ async function spawnAgentOnce(agent, prompt, timeoutSec) {
           LOGGER.line(agent, 'json:normalized', normalizedJsonText, true); // fileOnly = true
           resolve({ ok: true, json, raw: stdout });
         } catch (parseErr) {
-          console.error(parseErr);
-          resolve({ ok: false, error: 'Non‑JSON or parse error', raw: parseErr });
+          resolve({ ok: false, error: `Non‑JSON or parse error from ${agent.id}: ${parseErr.message}`, raw: parseErr });
         }
       }
     });
@@ -422,9 +492,8 @@ async function spawnAgent(agent, prompt, timeoutSec) {
       return result;
     }
 
-    // Don't retry on parse errors or command not found
-    if (result.error?.includes('Non‑JSON or parse error') ||
-        result.error?.includes('Failed to spawn')) {
+    // Don't retry on command not found (system configuration issues)
+    if (result.error?.includes('Failed to spawn')) {
       return result;
     }
 
@@ -445,7 +514,7 @@ async function spawnAgent(agent, prompt, timeoutSec) {
 // Round: proposals — run propose prompt for each agent
 async function roundPropose(agents, question) {
   return Promise.all(agents.map(async (agent) => {
-    const prompt = buildPrompt(PROMPTS.propose, question);
+    const prompt = buildPrompt(PROMPTS.propose, question, {}, agents);
     LOGGER.line(agent, 'prompt:propose', 'Sent proposal prompt', true); // fileOnly = true
     const res = await spawnAgent(agent, prompt, 60);
     if (!res.ok) {
@@ -462,11 +531,12 @@ async function roundPropose(agents, question) {
 
 // Round: critique — each agent reviews peers and can revise
 async function roundCritique(agents, question, current) {
-  const extras = { proposals: current.map(p => ({ agentId: p.agentId, ...p.payload })) };
   return Promise.all(agents.map(async (agent) => {
     const orig = current.find(p => p.agentId === agent.id)?.payload || {};
-    const context = { ...extras, your_original: orig };
-    const prompt = buildPrompt(PROMPTS.critique, question, context);
+    // Filter out current agent's proposal to avoid duplication with your_original
+    const otherProposals = current.filter(p => p.agentId !== agent.id).map(p => ({ agentId: p.agentId, ...p.payload }));
+    const context = { proposals: otherProposals, your_original: orig };
+    const prompt = buildPrompt(PROMPTS.critique, question, context, agents);
     LOGGER.line(agent, 'prompt:critique', 'Sent critique prompt with peers', true); // fileOnly = true
     const res = await spawnAgent(agent, prompt, 60);
     if (!res.ok) {
@@ -483,12 +553,7 @@ async function roundCritique(agents, question, current) {
         if (conversationMsg) {
           LOGGER.line(agent, 'critique', highlightConversation(conversationMsg, agents));
         } else {
-          // Fallback if no conversation message provided
-          const target = c.target_agent;
-          const severity = c.severity;
-          const issue = c.claim_or_line || 'your approach';
-          const fallbackMsg = `@${target}, I have a ${severity} concern about ${issue}.`;
-          LOGGER.line(agent, 'critique', highlightConversation(fallbackMsg, agents));
+          LOGGER.line(agent, 'error', `Missing conversation_message for critique of ${c.target_agent}`);
         }
       }
     } else {
@@ -508,13 +573,16 @@ async function roundRevise(agents, question, current, critiques) {
       if (!feedbackByAgent.has(target)) {
         feedbackByAgent.set(target, []);
       }
-      feedbackByAgent.get(target).push({
-        from_agent: crit.agentId,
-        severity: critique.severity,
-        issue: critique.claim_or_line,
-        rationale: critique.rationale,
-        suggested_fix: critique.suggested_fix
-      });
+      // Process each critique point for this target agent
+      for (const point of (critique.points || [])) {
+        feedbackByAgent.get(target).push({
+          from_agent: crit.agentId,
+          severity: point.severity,
+          issue: point.claim_or_line,
+          rationale: point.rationale,
+          suggested_fix: point.suggested_fix
+        });
+      }
     }
   }
 
@@ -531,7 +599,7 @@ async function roundRevise(agents, question, current, critiques) {
       your_original_proposal: originalProposal,
       feedback_received: feedback
     };
-    const prompt = buildPrompt(PROMPTS.revise, question, context);
+    const prompt = buildPrompt(PROMPTS.revise, question, context, agents);
     LOGGER.line(agent, 'prompt:revise', 'Sent revision prompt with peer feedback', true); // fileOnly = true
     const res = await spawnAgent(agent, prompt, 60);
 
@@ -549,16 +617,7 @@ async function roundRevise(agents, question, current, critiques) {
       if (conversationMsg) {
         LOGGER.line(agent, 'revision', highlightConversation(conversationMsg, agents));
       } else {
-        // Fallback if no conversation message provided
-        const critic = response.critic_agent;
-        const action = response.action_taken || 'unknown';
-        if (action === 'revised') {
-          const fallbackMsg = `@${critic}, thanks for your suggestions! I've made some adjustments.`;
-          LOGGER.line(agent, 'revision', highlightConversation(fallbackMsg, agents));
-        } else {
-          const fallbackMsg = `@${critic}, I appreciate your input, but I believe my original approach is best.`;
-          LOGGER.line(agent, 'revision', highlightConversation(fallbackMsg, agents));
-        }
+        LOGGER.line(agent, 'error', `Missing conversation_message for response to ${response.critic_agent}`);
       }
     }
 
@@ -584,7 +643,7 @@ async function roundRevise(agents, question, current, critiques) {
 async function roundVote(agents, question, current) {
   const extras = { candidates: current.map(c => ({ agentId: c.agentId, payload: c.payload })) };
   return Promise.all(agents.map(async (agent) => {
-    const prompt = buildPrompt(PROMPTS.vote, question, extras);
+    const prompt = buildPrompt(PROMPTS.vote, question, extras, agents);
     LOGGER.line(agent, 'prompt:vote', 'Sent vote prompt for candidates', true); // fileOnly = true
     const res = await spawnAgent(agent, prompt, 60);
     if (!res.ok) {
@@ -595,43 +654,7 @@ async function roundVote(agents, question, current) {
     if (conversationMsg) {
       LOGGER.line(agent, 'vote', highlightConversation(conversationMsg, agents));
     } else {
-      // Fallback if no conversation message provided
-      const scores = res.json.scores || [];
-      const blockers = res.json.blocking_issues || [];
-
-      if (scores.length > 0) {
-        const topScore = Math.max(...scores.map(s => s.score));
-        const topAgent = scores.find(s => s.score === topScore);
-        const scoresSummary = scores.map(s => `${s.agent_id} (${s.score.toFixed(2)})`).join(', ');
-
-        let message = `My ratings: ${scoresSummary}.`;
-        if (topAgent) {
-          message += ` I think ${topAgent.agent_id}'s proposal is strongest.`;
-        }
-
-        // Be specific about blocking concerns
-        if (blockers.length > 0) {
-          const blockersByAgent = new Map();
-          for (const blocker of blockers) {
-            if (!blockersByAgent.has(blocker.agent_id)) {
-              blockersByAgent.set(blocker.agent_id, []);
-            }
-            blockersByAgent.get(blocker.agent_id).push(blocker.issue);
-          }
-
-          const blockerMessages = [];
-          for (const [blockedAgent, issues] of blockersByAgent.entries()) {
-            const issueCount = issues.length;
-            blockerMessages.push(`${issueCount} blocker${issueCount > 1 ? 's' : ''} with ${blockedAgent}'s approach`);
-          }
-
-          message += ` However, I have ${blockerMessages.join(' and ')}.`;
-        }
-
-        LOGGER.line(agent, 'vote', highlightConversation(message, agents));
-      } else {
-        LOGGER.line(agent, 'vote', "I couldn't provide meaningful scores for the current proposals.");
-      }
+      LOGGER.line(agent, 'error', 'Missing conversation_message for vote response');
     }
     return { agentId: agent.id, res };
   }));
@@ -641,10 +664,12 @@ async function roundVote(agents, question, current) {
 function noveltyScore(critiques, seen) {
   let novel = 0;
   for (const c of (critiques || [])) {
-    const key = `${c.target_agent}|${c.severity}|${(c.claim_or_line || '').slice(0, 40)}`;
-    if (!seen.has(key)) {
-      novel++;
-      seen.add(key);
+    for (const point of (c.points || [])) {
+      const key = `${c.target_agent}|${point.severity}|${(point.claim_or_line || '').slice(0, 40)}`;
+      if (!seen.has(key)) {
+        novel++;
+        seen.add(key);
+      }
     }
   }
   return { novel, seen };
@@ -789,16 +814,20 @@ async function runOrchestration(userQuestion, agents, logger) {
   // Log the question
   logger.line({ id: 'orchestrator', avatar: '🗂️', displayName: 'Orchestrator', color: 'white' }, 'question', userQuestion);
 
-  // Show agents are thinking
-  for (const agent of agents) {
-    logger.line(agent, 'thinking', 'Analyzing the problem...');
-  }
-
   // Add separator after thinking phase
   console.log('');
 
   // Round 0: initial proposals
-  logger.blockTitle('Initial Proposals');
+  logger.blockTitle('Initial Proposals ......');
+
+  // Show agents are thinking about their proposals
+  for (const agent of agents) {
+    logger.line(agent, 'thinking', 'Crafting my solution approach...');
+  }
+
+  // Add separator after thinking
+  console.log('');
+
   const r0 = await roundPropose(agents, userQuestion);
 
   // Check for interruption
@@ -908,7 +937,8 @@ async function runOrchestration(userQuestion, agents, logger) {
       // Build scorecards summary
       const scorecards = agents.map(a => {
         const nov = okCrits.find(x => x.agentId === a.id)?.res.json?.critiques?.length || 0;
-        const blk = okCrits.find(x => x.agentId === a.id)?.res.json?.critiques?.filter(c => c.severity === 'blocker').length || 0;
+        const blk = okCrits.find(x => x.agentId === a.id)?.res.json?.critiques?.reduce((count, c) =>
+          count + (c.points?.filter(p => p.severity === 'blocker').length || 0), 0) || 0;
         const isRubber = !okCrits.find(x => x.agentId === a.id) && okVotes.find(x => x.agentId === a.id);
         return {
           agentId: a.id,

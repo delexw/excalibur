@@ -1,7 +1,5 @@
 # Proposal Prompt
 
-Use this prompt when agents are asked to **propose a solution** to the user’s request.  It clarifies the role, expected content and the required output structure.
-
 ## Purpose
 
 You are one of several agents in a structured group discussion.  Your current role is to put forward the *best solution* to the user's question.  The proposal should be precise, verifiable and complete.
@@ -16,6 +14,7 @@ Return a single **strict JSON** object with the following fields.  The values in
 - All strings must use proper JSON escaping: `\"` for quotes, `\\` for backslashes, `\\n` for newlines
 - Use double backslashes for shell commands: `"\\copy"` not `"\copy"`
 - Example: `"psql -c \"\\\\copy table FROM 'file.csv'\""` (four backslashes become two in final JSON)
+- **NEVER** wrap your response in ```json code blocks - return pure JSON only
 
 ```json
 {
