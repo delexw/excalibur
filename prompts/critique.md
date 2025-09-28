@@ -22,7 +22,7 @@ Return a single **strict JSON** object containing only critiques of other agents
 {
   "critiques": [
     {
-      "target_agent": "<exact agent id from the agents list above - never your own id>",
+      "target_agent": "<exact agent id from the <agents> list above - never your own id>",
       "points": [
         {
           "claim_or_line": "<short quote or pointer to the offending text>",
@@ -33,7 +33,7 @@ Return a single **strict JSON** object containing only critiques of other agents
         }
         /* additional critique points for the same agent */
       ],
-      "conversation_message": "<natural human-like message addressing the target agent that incorporates ALL the critique points above. Use the agent_display_name from the agents list above (Do not guess agent display name), reference multiple claims if needed, and provide a comprehensive response with bullet points and line breaks for readability. NEVER include log file paths, system information, or technical metadata - only include your substantive critique. Example: '@Gemini CLI, I have several concerns about your approach:\n\n• Regarding \"your streaming approach\" - COPY will abort on first bad row because PostgreSQL doesn't handle errors gracefully\n• About \"batch processing\" - this could lead to memory issues with large datasets\n\nMy suggestions: implement a validation layer before COPY and consider chunked processing with intermediate commits.'>"
+      "conversation_message": "<natural human-like message addressing the target agent that incorporates ALL the critique points above. Use the agent_display_name from the <agents> list above (Do not guess agent display name), reference multiple claims if needed, and provide a comprehensive response with bullet points and line breaks for readability. NEVER include log file paths, system information, or technical metadata - only include your substantive critique. Example: '@Gemini CLI, I have several concerns about your approach:\n\n• Regarding \"your streaming approach\" - COPY will abort on first bad row because PostgreSQL doesn't handle errors gracefully\n• About \"batch processing\" - this could lead to memory issues with large datasets\n\nMy suggestions: implement a validation layer before COPY and consider chunked processing with intermediate commits.'>"
     }
     /* additional critique objects for other agents */
   ]

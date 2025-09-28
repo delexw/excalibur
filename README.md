@@ -38,7 +38,7 @@ node index.js "Your question here" --preset=team --consensus=super --maxRounds=5
 ### Interactive Commands
 - `/help` or `-h` - Show help
 - `/question` or `-q` - Ask a question (or just type directly)
-- `/exit` or `/quit` - Exit the CLI
+- `/exit` - Exit the CLI
 
 ## Installation From Source
 

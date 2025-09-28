@@ -68,9 +68,8 @@ export class CommandParser {
     this.commands = new Map([
       ['/help', { description: 'Show available commands', aliases: ['-h', '/?'] }],
       ['/question', { description: 'Ask a question to agents', aliases: ['-q', 'ask'] }],
-      ['/preset', { description: 'Select consensus preset', aliases: ['-p'] }],
       ['/agents', { description: 'List available agents', aliases: ['-a'] }],
-      ['/config', { description: 'Show current configuration', aliases: ['-c'] }],
+      ['/config', { description: 'Show/modify configuration', aliases: ['-c'] }],
       ['/history', { description: 'Show session history', aliases: ['hist'] }],
       ['/clear', { description: 'Clear terminal screen', aliases: ['cls'] }],
       ['/exit', { description: 'Exit Excalibur CLI', aliases: ['quit'] }]
@@ -131,10 +130,12 @@ export class TerminalDisplay {
     console.log(ANSI.paint('\n💡 Examples:', 'cyan', this.noColor));
     console.log('  /question "How to optimize database queries?"');
     console.log('  How to implement async/await in Node.js?');
-    console.log('  What are the best practices for error handling?');
-    console.log('  -p team');
-    console.log('  -c');
-    console.log('  -h');
+    console.log('  /config                    - Show all settings');
+    console.log('  /config maxRounds 3        - Set max rounds');
+    console.log('  /config consensus super    - Set consensus mode');
+    console.log('  /config preset team        - Set preset');
+    console.log('  /config unanimousPct 0.8   - Set unanimous threshold');
+    console.log('  /config owner claude,gemini - Set required owners');
     console.log(ANSI.paint('\n⚡ Quick Actions:', 'cyan', this.noColor));
     console.log('  ESC         - Kill all running agents (emergency stop)');
     console.log('  TAB         - Auto-complete commands');
@@ -189,9 +190,30 @@ export class SessionManager {
   constructor() {
     this.history = [];
     this.config = {
+      // Core orchestration settings
       preset: 'team',
       consensus: 'super',
-      maxRounds: 5
+      maxRounds: 5,
+
+      // Consensus thresholds
+      unanimousPct: 0.75,
+      superMajorityPct: 0.75,
+      majorityPct: 0.5,
+
+      // Behavioral controls
+      allowBlockers: false,
+      rubberPenalty: 0.5,
+
+      // Owner approval settings
+      owner: [],
+      ownerMin: 0.8,
+      ownerMode: 'any',
+
+      // Logging and output
+      logDir: 'logs',
+      sessionTag: '',
+      quiet: false,
+      noColor: false
     };
     this.agents = [];
   }
@@ -246,7 +268,6 @@ export class InteractiveTerminal {
 
     // Live filter state
     this.filterDisplayActive = false;
-    this.currentInput = '';
     this.filteredCommands = [];
     this.selectedIndex = 0;
   }
@@ -322,16 +343,19 @@ export class InteractiveTerminal {
         await this.handleQuestion(args.join(' '));
         break;
 
-      case '/preset':
-        this.handlePreset(args[0]);
-        break;
 
       case '/agents':
         this.showAgents();
         break;
 
       case '/config':
-        this.showConfig();
+        if (args.length === 0) {
+          this.showConfig();
+        } else if (args.length === 2) {
+          this.setConfig(args[0], args[1]);
+        } else {
+          this.display.showError('Usage: /config [key value] (no args to show all)');
+        }
         break;
 
       case '/history':
@@ -382,7 +406,10 @@ export class InteractiveTerminal {
     if (this.questionHandler) {
       try {
         await this.questionHandler(question, this.sessionManager.getConfig());
-        this.display.showSuccess('Question processed successfully!');
+        // Only show success if not interrupted
+        if (!global.orchestrationInterrupted) {
+          this.display.showSuccess('Question processed successfully!');
+        }
       } catch (error) {
         this.display.showError(`Failed to process question: ${error.message}`);
       }
@@ -391,22 +418,6 @@ export class InteractiveTerminal {
     }
   }
 
-  handlePreset(preset) {
-    const validPresets = ['strict', 'default', 'fast', 'experiment', 'team'];
-
-    if (!preset) {
-      this.display.showInfo(`Current preset: ${this.sessionManager.getConfig().preset}`);
-      this.display.showInfo(`Available presets: ${validPresets.join(', ')}`);
-      return;
-    }
-
-    if (validPresets.includes(preset)) {
-      this.sessionManager.updateConfig('preset', preset);
-      this.display.showSuccess(`Preset changed to: ${preset}`);
-    } else {
-      this.display.showError(`Invalid preset: ${preset}. Available: ${validPresets.join(', ')}`);
-    }
-  }
 
   showAgents() {
     const agents = this.sessionManager.getAgents();
@@ -424,13 +435,35 @@ export class InteractiveTerminal {
 
   showConfig() {
     const config = this.sessionManager.getConfig();
-    console.log(ANSI.paint('\n⚙️  Current Configuration:', 'cyan'));
-    console.log(ANSI.paint('─'.repeat(30), 'gray'));
+    console.log(ANSI.paint('\n⚙️  Current Configuration:', 'cyan', this.display.noColor));
+    console.log(ANSI.paint('─'.repeat(50), 'gray', this.display.noColor));
 
-    Object.entries(config).forEach(([key, value]) => {
-      const keyText = ANSI.paint(key.padEnd(15), 'yellow');
-      console.log(`  ${keyText}: ${value}`);
-    });
+    // Group configurations by category
+    const categories = {
+      'Core Settings': ['preset', 'consensus', 'maxRounds'],
+      'Consensus Thresholds': ['unanimousPct', 'superMajorityPct', 'majorityPct'],
+      'Behavioral Controls': ['allowBlockers', 'rubberPenalty'],
+      'Owner Approval': ['owner', 'ownerMin', 'ownerMode'],
+      'Logging & Output': ['logDir', 'sessionTag', 'quiet', 'noColor']
+    };
+
+    for (const [category, keys] of Object.entries(categories)) {
+      console.log(ANSI.paint(`\n${category}:`, 'magenta', this.display.noColor));
+      for (const key of keys) {
+        if (config.hasOwnProperty(key)) {
+          const keyText = ANSI.paint(`  ${key}`.padEnd(20), 'yellow', this.display.noColor);
+          const value = Array.isArray(config[key]) ? config[key].join(', ') || 'none' : config[key];
+          console.log(`${keyText}: ${value}`);
+        }
+      }
+    }
+
+    console.log(ANSI.paint('\n💡 Usage: /config <key> <value> to change settings', 'gray', this.display.noColor));
+    console.log(ANSI.paint('  Examples:', 'gray', this.display.noColor));
+    console.log(ANSI.paint('    /config maxRounds 3', 'gray', this.display.noColor));
+    console.log(ANSI.paint('    /config consensus unanimous', 'gray', this.display.noColor));
+    console.log(ANSI.paint('    /config owner claude,gemini', 'gray', this.display.noColor));
+    console.log(ANSI.paint('    /config allowBlockers true', 'gray', this.display.noColor));
   }
 
   showHistory() {
@@ -453,6 +486,75 @@ export class InteractiveTerminal {
       console.log(ANSI.paint(`  ... and ${history.length - 10} more entries`, 'gray'));
     }
   }
+
+  // Set configuration value with type validation
+  setConfig(key, value) {
+    if (!this.sessionManager.config.hasOwnProperty(key)) {
+      this.display.showError(`Unknown configuration key: ${key}`);
+      this.display.showInfo('Use /config to see all available keys');
+      return;
+    }
+
+    const oldValue = this.sessionManager.config[key];
+    let newValue = value;
+
+    // Type conversion and validation
+    if (typeof oldValue === 'number') {
+      newValue = parseFloat(value);
+      if (isNaN(newValue)) {
+        this.display.showError(`Value for ${key} must be a number, got: ${value}`);
+        return;
+      }
+    } else if (typeof oldValue === 'boolean') {
+      if (!['true', 'false', '1', '0', 'yes', 'no'].includes(value.toLowerCase())) {
+        this.display.showError(`Value for ${key} must be boolean (true/false), got: ${value}`);
+        return;
+      }
+      newValue = ['true', '1', 'yes'].includes(value.toLowerCase());
+    } else if (Array.isArray(oldValue)) {
+      newValue = value.split(',').map(s => s.trim()).filter(Boolean);
+    }
+
+    // Special validations
+    if (key === 'consensus' && !['unanimous', 'super', 'majority'].includes(newValue)) {
+      this.display.showError('Consensus mode must be: unanimous, super, or majority');
+      return;
+    }
+
+    if (key === 'preset' && !['strict', 'default', 'fast', 'experiment', 'team'].includes(newValue)) {
+      this.display.showError('Preset must be: strict, default, fast, experiment, or team');
+      return;
+    }
+
+    if (key === 'ownerMode' && !['any', 'all'].includes(newValue)) {
+      this.display.showError('Owner mode must be: any or all');
+      return;
+    }
+
+    if (['unanimousPct', 'superMajorityPct', 'majorityPct', 'rubberPenalty'].includes(key)) {
+      if (newValue < 0 || newValue > 1) {
+        this.display.showError(`${key} must be between 0 and 1, got: ${newValue}`);
+        return;
+      }
+    }
+
+    if (key === 'maxRounds' && (newValue < 1 || newValue > 20)) {
+      this.display.showError('maxRounds must be between 1 and 20');
+      return;
+    }
+
+    if (key === 'ownerMin' && (newValue < 0 || newValue > 1)) {
+      this.display.showError('ownerMin must be between 0 and 1');
+      return;
+    }
+
+    if (this.sessionManager.updateConfig(key, newValue)) {
+      this.display.showSuccess(`${key} updated: ${oldValue} → ${Array.isArray(newValue) ? newValue.join(', ') || 'none' : newValue}`);
+    } else {
+      this.display.showError(`Failed to update ${key}`);
+    }
+  }
+
 
   shutdown() {
     if (!this.running) return;
@@ -487,10 +589,10 @@ export class InteractiveTerminal {
         allCompletions.push(...config.aliases);
       }
 
-      // Add some common preset names for /preset command
-      if (line.startsWith('/preset ') || line.startsWith('-p ')) {
-        const presetCompletions = ['strict', 'default', 'fast', 'experiment', 'team'];
-        return [presetCompletions.filter(c => c.startsWith(line.split(' ')[1] || '')), line];
+      // Add completions for /config command
+      if (line.startsWith('/config ')) {
+        const configKeys = Object.keys(this.sessionManager.getConfig());
+        return [configKeys.filter(c => c.startsWith(line.split(' ')[1] || '')), line];
       }
 
       // Filter completions based on what user has typed
@@ -546,16 +648,13 @@ export class InteractiveTerminal {
         return;
       }
 
-      // Update current input based on keypress
-      if (key.name === 'backspace') {
-        this.currentInput = this.currentInput.slice(0, -1);
-      } else if (str && str.length === 1 && !key.ctrl && !key.meta) {
-        this.currentInput += str;
-      }
+      // Use readline's line property instead of tracking manually
+      // This fixes the filtering issue by using the actual input buffer
+      const currentLine = this.rl.line || '';
 
       // Show filtered commands if user is typing a command
-      if (this.currentInput.startsWith('/') || this.currentInput.startsWith('-')) {
-        this.showLiveFilter(this.currentInput);
+      if (currentLine.startsWith('/') || currentLine.startsWith('-')) {
+        this.showLiveFilter(currentLine);
       } else if (this.filterDisplayActive) {
         this.clearLiveFilter();
       }
@@ -676,9 +775,6 @@ export class InteractiveTerminal {
     // Clear the filter display first
     this.clearLiveFilter();
 
-    // Reset current input state
-    this.currentInput = '';
-
     // Clear the current readline input completely
     this.rl.line = '';
     this.rl.cursor = 0;
@@ -729,7 +825,6 @@ export class InteractiveTerminal {
     process.stdout.write('\x1b[?25h'); // Show cursor
 
     this.filterDisplayActive = false;
-    this.currentInput = '';
     this.filteredCommands = [];
     this.selectedIndex = 0;
   }

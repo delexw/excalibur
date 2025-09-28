@@ -47,6 +47,27 @@ global.activeProcesses = activeProcesses;
 // Global flag to signal orchestration interruption
 global.orchestrationInterrupted = false;
 
+// Constant for interruption error message
+const INTERRUPTION_ERROR = 'Interrupted by user';
+
+// Helper function to check for interruption and return consistent error result
+function checkInterruption(agent, format = 'spawn') {
+  if (!global.orchestrationInterrupted) {
+    return null;
+  }
+
+  switch (format) {
+    case 'spawn':
+      return { ok: false, error: INTERRUPTION_ERROR, output: '', agent };
+    case 'round':
+      return { agentId: agent?.id, error: INTERRUPTION_ERROR, raw: null };
+    case 'boolean':
+      return true;
+    default:
+      return { ok: false, error: INTERRUPTION_ERROR, output: '', agent };
+  }
+}
+
 function gracefulShutdown(signal) {
   console.log(`\nReceived ${signal}. Terminating active processes...`);
   for (const child of activeProcesses) {
@@ -333,7 +354,10 @@ function buildPrompt(base, question, context = {}, agents = []) {
   // Replace {{AGENTS}} placeholder with agent list
   let prompt = base;
   if (prompt.includes('{{AGENTS}}')) {
-    const agentList = agents.map(agent => `agent_id:${agent.id}, agent_display_name:@${agent.displayName}`).join(', ');
+    const agentList = JSON.stringify(agents.map(agent => ({
+      agent_id: agent.id,
+      agent_display_name: `@${agent.displayName}`
+    })), null, 2);
     prompt = prompt.replace('{{AGENTS}}', agentList);
   }
 
@@ -422,6 +446,8 @@ function loadAgents() {
 // Spawn an agent CLI process with prompt; return JSON output or error (single attempt)
 async function spawnAgentOnce(agent, prompt, timeoutSec) {
   return new Promise((resolve) => {
+    let resolved = false;
+
     const args = (agent.args || []).map(a => a.replace('{PROMPT}', prompt));
     let child;
     try {
@@ -441,6 +467,9 @@ async function spawnAgentOnce(agent, prompt, timeoutSec) {
     let stdout = '';
     let stderr = '';
     let wasKilledByTimeout = false;
+
+    // Only check for interruption when child process is actually killed by killAllAgents
+    // No polling - rely on process termination signals
     const timer = setTimeout(() => {
       wasKilledByTimeout = true;
       child.kill('SIGKILL');
@@ -449,26 +478,40 @@ async function spawnAgentOnce(agent, prompt, timeoutSec) {
     child.stderr.on('data', d => { stderr += d.toString(); });
     // Handle spawn error events
     child.on('error', err => {
-      clearTimeout(timer);
-      activeProcesses.delete(child);
-      resolve({ ok: false, error: `Spawn error: ${err.message}` });
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(timer);
+        activeProcesses.delete(child);
+        resolve({ ok: false, error: `Spawn error: ${err.message}` });
+      }
     });
     child.on('close', code => {
-      clearTimeout(timer);
-      activeProcesses.delete(child);
-      if (wasKilledByTimeout) {
-        const timeoutMs = Math.max(agent.timeoutMs || timeoutSec * 1000, timeoutSec * 1000);
-        resolve({ ok: false, error: `Process killed by timeout after ${timeoutMs}ms` });
-      } else if (code !== 0 && !stdout.trim()) {
-        resolve({ ok: false, error: `Exited with code ${code}: ${stderr}` });
-      } else {
-        try {
-          const normalizedJsonText = normalizeJsonText(stdout);
-          const json = JSON.parse(normalizedJsonText);
-          LOGGER.line(agent, 'json:normalized', normalizedJsonText, true); // fileOnly = true
-          resolve({ ok: true, json, raw: stdout });
-        } catch (parseErr) {
-          resolve({ ok: false, error: `Non‑JSON or parse error from ${agent.id}: ${parseErr.message}`, raw: parseErr });
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(timer);
+        activeProcesses.delete(child);
+
+        // Check for interruption before processing results
+        const interruption = checkInterruption(agent);
+        if (interruption) {
+          resolve(interruption);
+          return;
+        }
+
+        if (wasKilledByTimeout) {
+          const timeoutMs = Math.max(agent.timeoutMs || timeoutSec * 1000, timeoutSec * 1000);
+          resolve({ ok: false, error: `Process killed by timeout after ${timeoutMs}ms` });
+        } else if (code !== 0 && !stdout.trim()) {
+          resolve({ ok: false, error: `Exited with code ${code}: ${stderr}` });
+        } else {
+          try {
+            const normalizedJsonText = normalizeJsonText(stdout);
+            const json = JSON.parse(normalizedJsonText);
+            LOGGER.line(agent, 'response:json', normalizedJsonText, true); // Log JSON response to file only
+            resolve({ ok: true, json, raw: stdout });
+          } catch (parseErr) {
+            resolve({ ok: false, error: `Non‑JSON or parse error from ${agent.id}: ${parseErr.message}`, raw: parseErr });
+          }
         }
       }
     });
@@ -482,8 +525,17 @@ async function spawnAgent(agent, prompt, timeoutSec) {
   const maxRetries = 3; // Retry Claude CLI calls, others once only
   const baseDelay = 1000; // 1 second base delay
 
+  let lastResult;
+
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    // Check for interruption before each attempt
+    const interruption = checkInterruption(agent);
+    if (interruption) {
+      return interruption;
+    }
+
     const result = await spawnAgentOnce(agent, prompt, timeoutSec);
+    lastResult = result;
 
     if (result.ok) {
       if (attempt > 1) {
@@ -497,28 +549,37 @@ async function spawnAgent(agent, prompt, timeoutSec) {
       return result;
     }
 
-    // Log retry attempt
+    // Log retry attempt only if we're not on the final attempt
     if (attempt < maxRetries) {
-      const delay = baseDelay * attempt; // Progressive delay: 1s, 2s, 3s
+      const delay = baseDelay * Math.pow(2, attempt - 1); // Exponential backoff: 1s, 2s, 4s
       LOGGER.line(agent, 'retry:attempt', `Attempt ${attempt}/${maxRetries} failed: ${result.error}. Retrying in ${delay}ms`, true);
       await new Promise(resolve => setTimeout(resolve, delay));
-    } else {
-      LOGGER.line(agent, 'retry:exhausted', `All ${maxRetries} attempts failed. Final error: ${result.error}`);
     }
   }
 
-  // Return the last failed result
-  return await spawnAgentOnce(agent, prompt, timeoutSec);
+  // All attempts failed - log exhausted and return the last result
+  LOGGER.line(agent, 'retry:exhausted', `All ${maxRetries} attempts failed. Final error: ${lastResult.error}`);
+  return lastResult;
 }
 
 // Round: proposals — run propose prompt for each agent
 async function roundPropose(agents, question) {
-  return Promise.all(agents.map(async (agent) => {
+  // Check for interruption before starting any agents
+  if (checkInterruption(null, 'boolean')) {
+    // Don't start any agents if already interrupted
+    return [];
+  }
+
+  const promises = agents.map(async (agent) => {
     const prompt = buildPrompt(PROMPTS.propose, question, {}, agents);
-    LOGGER.line(agent, 'prompt:propose', 'Sent proposal prompt', true); // fileOnly = true
+    LOGGER.line(agent, 'prompt:propose', 'Sent proposal prompt');
+    LOGGER.line(agent, 'prompt:full', prompt, true); // Log full prompt to file only
     const res = await spawnAgent(agent, prompt, 60);
     if (!res.ok) {
-      LOGGER.line(agent, 'error', res.error || 'Unknown error');
+      // Don't log interruption errors to keep ESC clean
+      if (res.error !== INTERRUPTION_ERROR) {
+        LOGGER.line(agent, 'error', res.error || 'Unknown error');
+      }
       return { agentId: agent.id, error: res.error, raw: res.raw };
     }
     const proposal = res.json.proposal || res.json.answer || 'No proposal provided';
@@ -526,21 +587,33 @@ async function roundPropose(agents, question) {
     const summary = proposal.length > 150 ? proposal.slice(0, 150) + '...' : proposal;
     LOGGER.line(agent, 'proposal', `My proposal: ${summary}${confidence}`);
     return { agentId: agent.id, res };
-  }));
+  });
+
+  return Promise.all(promises);
 }
 
 // Round: critique — each agent reviews peers and can revise
 async function roundCritique(agents, question, current) {
-  return Promise.all(agents.map(async (agent) => {
+  // Check for interruption before starting any agents
+  if (checkInterruption(null, 'boolean')) {
+    // Don't start any agents if already interrupted
+    return [];
+  }
+
+  const promises = agents.map(async (agent) => {
     const orig = current.find(p => p.agentId === agent.id)?.payload || {};
     // Filter out current agent's proposal to avoid duplication with your_original
     const otherProposals = current.filter(p => p.agentId !== agent.id).map(p => ({ agentId: p.agentId, ...p.payload }));
     const context = { proposals: otherProposals, your_original: orig };
     const prompt = buildPrompt(PROMPTS.critique, question, context, agents);
-    LOGGER.line(agent, 'prompt:critique', 'Sent critique prompt with peers', true); // fileOnly = true
+    LOGGER.line(agent, 'prompt:critique', 'Sent critique prompt with peers');
+    LOGGER.line(agent, 'prompt:full', prompt, true); // Log full prompt to file only
     const res = await spawnAgent(agent, prompt, 60);
     if (!res.ok) {
-      LOGGER.line(agent, 'error', res.error || 'Unknown error');
+      // Don't log interruption errors to keep ESC clean
+      if (res.error !== INTERRUPTION_ERROR) {
+        LOGGER.line(agent, 'error', res.error || 'Unknown error');
+      }
       return { agentId: agent.id, error: res.error, raw: res.raw };
     }
     const critiques = res.json.critiques || [];
@@ -560,7 +633,9 @@ async function roundCritique(agents, question, current) {
       LOGGER.line(agent, 'critique', 'The current proposals look solid to me.');
     }
     return { agentId: agent.id, res };
-  }));
+  });
+
+  return Promise.all(promises);
 }
 
 // Round: revise — each agent updates their proposal based on received feedback
@@ -586,7 +661,13 @@ async function roundRevise(agents, question, current, critiques) {
     }
   }
 
-  return Promise.all(agents.map(async (agent) => {
+  // Check for interruption before starting any agents
+  if (checkInterruption(null, 'boolean')) {
+    // Don't start any agents if already interrupted
+    return [];
+  }
+
+  const promises = agents.map(async (agent) => {
     const feedback = feedbackByAgent.get(agent.id) || [];
     const originalProposal = current.find(p => p.agentId === agent.id)?.payload || {};
 
@@ -600,11 +681,15 @@ async function roundRevise(agents, question, current, critiques) {
       feedback_received: feedback
     };
     const prompt = buildPrompt(PROMPTS.revise, question, context, agents);
-    LOGGER.line(agent, 'prompt:revise', 'Sent revision prompt with peer feedback', true); // fileOnly = true
+    LOGGER.line(agent, 'prompt:revise', 'Sent revision prompt with peer feedback');
+    LOGGER.line(agent, 'prompt:full', prompt, true); // Log full prompt to file only
     const res = await spawnAgent(agent, prompt, 60);
 
     if (!res.ok) {
-      LOGGER.line(agent, 'error', res.error || 'Unknown error');
+      // Don't log interruption errors to keep ESC clean
+      if (res.error !== INTERRUPTION_ERROR) {
+        LOGGER.line(agent, 'error', res.error || 'Unknown error');
+      }
       return { agentId: agent.id, error: res.error, raw: res.raw };
     }
 
@@ -636,18 +721,30 @@ async function roundRevise(agents, question, current, critiques) {
     }
 
     return { agentId: agent.id, res };
-  }));
+  });
+
+  return Promise.all(promises);
 }
 
 // Round: vote — each agent scores candidates
 async function roundVote(agents, question, current) {
+  // Check for interruption before starting any agents
+  if (checkInterruption(null, 'boolean')) {
+    // Don't start any agents if already interrupted
+    return [];
+  }
+
   const extras = { candidates: current.map(c => ({ agentId: c.agentId, payload: c.payload })) };
-  return Promise.all(agents.map(async (agent) => {
+  const promises = agents.map(async (agent) => {
     const prompt = buildPrompt(PROMPTS.vote, question, extras, agents);
-    LOGGER.line(agent, 'prompt:vote', 'Sent vote prompt for candidates', true); // fileOnly = true
+    LOGGER.line(agent, 'prompt:vote', 'Sent vote prompt for candidates');
+    LOGGER.line(agent, 'prompt:full', prompt, true); // Log full prompt to file only
     const res = await spawnAgent(agent, prompt, 60);
     if (!res.ok) {
-      LOGGER.line(agent, 'error', res.error || 'Unknown error');
+      // Don't log interruption errors to keep ESC clean
+      if (res.error !== INTERRUPTION_ERROR) {
+        LOGGER.line(agent, 'error', res.error || 'Unknown error');
+      }
       return { agentId: agent.id, error: res.error, raw: res.raw };
     }
     const conversationMsg = res.json.conversation_message;
@@ -657,7 +754,9 @@ async function roundVote(agents, question, current) {
       LOGGER.line(agent, 'error', 'Missing conversation_message for vote response');
     }
     return { agentId: agent.id, res };
-  }));
+  });
+
+  return Promise.all(promises);
 }
 
 // Novelty score: count new critique pairs (target|severity|claim) to discourage repeats
@@ -769,20 +868,14 @@ function consensusReached(avg, mode) {
     interactive.setQuestionHandler(async (question, config) => {
       // This will run the full orchestration for the question
       const agents = loadAgents();
-      // Reset logger for new session
-      const sessionLogger = new ConversationLogger(LOG.dir,
-        `${LOG.session}-${Date.now()}`,
-        { noColor: LOG.noColor, quiet: LOG.quiet });
 
       try {
-        // Run the full orchestration
-        await runOrchestration(question, agents, sessionLogger);
+        // Run the full orchestration using the global LOGGER
+        await runOrchestration(question, agents);
         return { success: true };
       } catch (error) {
         console.error('Orchestration failed:', error);
         return { success: false, error: error.message };
-      } finally {
-        // Logger is closed by runOrchestration
       }
     });
 
@@ -795,16 +888,16 @@ function consensusReached(avg, mode) {
 
   // Non-interactive mode continues as before
   const agents = loadAgents();
-  await runOrchestration(userQuestion, agents, LOGGER);
+  await runOrchestration(userQuestion, agents);
 })(); // End of main async function
 
 // Extract orchestration logic into reusable function
-async function runOrchestration(userQuestion, agents, logger) {
+async function runOrchestration(userQuestion, agents) {
   // Reset interruption flag at the start
   global.orchestrationInterrupted = false;
 
   // Display session configuration
-  logger.blockTitle(`Session ${LOG.session} — ${agents.length} agents`);
+  LOGGER.blockTitle(`Session ${LOGGER.session} — ${agents.length} agents`);
 
   if (!LOG.quiet) {
     const presetInfo = presetName ? `preset=${presetName} | ` : '';
@@ -812,17 +905,17 @@ async function runOrchestration(userQuestion, agents, logger) {
     console.log(paint(`Consensus=${consensusMode} | thresholds: U=${CONSENSUS.unanimousPct} S=${CONSENSUS.superMajorityPct} M=${CONSENSUS.majorityPct} | blockers=${CONSENSUS.requireNoBlockers ? 'strict' : 'allowed'} | rubberPenalty=${DELIB.weightPenaltyRubberStamp}\n`, 'gray'));
   }
   // Log the question
-  logger.line({ id: 'orchestrator', avatar: '🗂️', displayName: 'Orchestrator', color: 'white' }, 'question', userQuestion);
+  LOGGER.line({ id: 'orchestrator', avatar: '🗂️', displayName: 'Orchestrator', color: 'white' }, 'question', userQuestion);
 
   // Add separator after thinking phase
   console.log('');
 
   // Round 0: initial proposals
-  logger.blockTitle('Initial Proposals ......');
+  LOGGER.blockTitle('Initial Proposals ......');
 
   // Show agents are thinking about their proposals
   for (const agent of agents) {
-    logger.line(agent, 'thinking', 'Crafting my solution approach...');
+    LOGGER.line(agent, 'thinking', 'Crafting my solution approach...');
   }
 
   // Add separator after thinking
@@ -831,8 +924,7 @@ async function runOrchestration(userQuestion, agents, logger) {
   const r0 = await roundPropose(agents, userQuestion);
 
   // Check for interruption
-  if (global.orchestrationInterrupted) {
-    console.log('\n🛑 Orchestration interrupted by user.');
+  if (checkInterruption(null, 'boolean')) {
     return;
   }
 
@@ -848,11 +940,11 @@ async function runOrchestration(userQuestion, agents, logger) {
 
   // Critique/vote rounds
   for (let round = 1; round <= maxRounds; round++) {
-    logger.blockTitle(`Round ${round}: critiques & voting`);
+    LOGGER.blockTitle(`Round ${round}: critiques & voting`);
 
     // Show agents are thinking about critiques
     for (const agent of agents) {
-      logger.line(agent, 'thinking', 'Reviewing peer proposals...');
+      LOGGER.line(agent, 'thinking', 'Reviewing peer proposals...');
     }
 
     // Add separator after thinking
@@ -862,8 +954,7 @@ async function runOrchestration(userQuestion, agents, logger) {
     const crits = await roundCritique(agents, userQuestion, current);
 
     // Check for interruption after critique
-    if (global.orchestrationInterrupted) {
-      console.log('\n🛑 Orchestration interrupted by user.');
+    if (checkInterruption(null, 'boolean')) {
       return;
     }
 
@@ -878,7 +969,7 @@ async function runOrchestration(userQuestion, agents, logger) {
     // Revision phase - agents update their proposals based on feedback
     console.log('');
     for (const agent of agents) {
-      logger.line(agent, 'thinking', 'Considering peer feedback...');
+      LOGGER.line(agent, 'thinking', 'Considering peer feedback...');
     }
 
     // Add separator after thinking
@@ -950,17 +1041,17 @@ async function runOrchestration(userQuestion, agents, logger) {
           avgPeerScore: undefined, // could be filled via raterScores
         };
       });
-      logger.summary(scorecards);
-      logger.end();
+      LOGGER.summary(scorecards);
+      LOGGER.end();
       return;
     }
   }
   // No consensus reached within maxRounds; fallback to best candidate
-  logger.blockTitle('Max rounds reached — selecting highest scoring proposal');
+  LOGGER.blockTitle('Max rounds reached — selecting highest scoring proposal');
 
   // Show agents are thinking about final votes
   for (const agent of agents) {
-    logger.line(agent, 'thinking', 'Making final evaluations...');
+    LOGGER.line(agent, 'thinking', 'Making final evaluations...');
   }
 
   // Add separator after thinking
@@ -1000,6 +1091,6 @@ async function runOrchestration(userQuestion, agents, logger) {
     rubber: false,
     avgPeerScore: undefined,
   }));
-  logger.summary(scorecards);
-  logger.end();
+  LOGGER.summary(scorecards);
+  LOGGER.end();
 }
