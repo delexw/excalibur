@@ -1,6 +1,6 @@
 # Critique Prompt
 
-Use this prompt when agents must **evaluate and critique** their peers’ proposals.  It emphasises novelty, depth and constructive feedback.
+<agents>{{AGENTS}}</agents>
 
 ## Purpose
 
@@ -16,18 +16,24 @@ Return a single **strict JSON** object containing only critiques of other agents
 - All strings must use proper JSON escaping: `\"` for quotes, `\\` for backslashes, `\\n` for newlines
 - Use double backslashes for shell commands: `"\\copy"` not `"\copy"`
 - Example: `"psql -c \"\\\\copy table FROM 'file.csv'\""` (four backslashes become two in final JSON)
+- **NEVER** wrap your response in ```json code blocks - return pure JSON only
 
 ```json
 {
   "critiques": [
     {
-      "target_agent": "<exact agent id from system configuration (e.g., 'claude', 'gemini', 'codex') - never your own id>",
-      "claim_or_line": "<short quote or pointer to the offending text>",
-      "severity": "<minor|major|blocker>",
-      "rationale": "<why this point is wrong, risky or incomplete>",
-      "evidence": ["<links or short facts supporting your critique>", "…"],
-      "suggested_fix": "<concise correction or alternative approach>",
-      "conversation_message": "<natural human-like message addressing the target agent that incorporates the above fields. Address them using their displayName (like 'Claude CLI', 'Gemini CLI', 'Codex CLI'), reference the claim_or_line, explain the rationale, and include the suggested_fix. Example: '@Gemini CLI, I have a major concern about \"your streaming approach\". The issue is that COPY will abort on first bad row because PostgreSQL doesn't handle errors gracefully in COPY FROM STDIN. My suggestion: implement a validation layer before COPY.'>"
+      "target_agent": "<exact agent id from the agents list above - never your own id>",
+      "points": [
+        {
+          "claim_or_line": "<short quote or pointer to the offending text>",
+          "severity": "<minor|major|blocker>",
+          "rationale": "<why this point is wrong, risky or incomplete>",
+          "evidence": ["<links or short facts supporting your critique>", "…"],
+          "suggested_fix": "<concise correction or alternative approach>"
+        }
+        /* additional critique points for the same agent */
+      ],
+      "conversation_message": "<natural human-like message addressing the target agent that incorporates ALL the critique points above. Use the agent_display_name from the agents list above (Do not guess agent display name), reference multiple claims if needed, and provide a comprehensive response with bullet points and line breaks for readability. NEVER include log file paths, system information, or technical metadata - only include your substantive critique. Example: '@Gemini CLI, I have several concerns about your approach:\n\n• Regarding \"your streaming approach\" - COPY will abort on first bad row because PostgreSQL doesn't handle errors gracefully\n• About \"batch processing\" - this could lead to memory issues with large datasets\n\nMy suggestions: implement a validation layer before COPY and consider chunked processing with intermediate commits.'>"
     }
     /* additional critique objects for other agents */
   ]

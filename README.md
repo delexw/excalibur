@@ -38,11 +38,16 @@ node index.js "Your question here" --preset=team --consensus=super --maxRounds=5
 - `/question` or `-q` - Ask a question (or just type directly)
 - `/exit` or `/quit` - Exit the CLI
 
-## Installation
+## Installation From Source
 
 ```bash
 npm install -g .
 ```
+Then
+```bash
+excalibur "Explain how to stream large CSVs into Postgres safely." --preset=team --consensus=super --maxRounds=5
+```
+
 
 ## Requirements
 

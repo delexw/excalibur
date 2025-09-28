@@ -3,7 +3,7 @@
     "id": "claude",
     "displayName": "Claude CLI",
     "cmd": "claude",
-    "args": ["-p", "{PROMPT}", "--dangerously-skip-permissions"],
+    "args": ["-p", "{PROMPT}"],
     "inputMode": "arg",
     "supportsSystemPrefix": true,
     "timeoutMs": 300000,
@@ -11,15 +11,26 @@
     "color": "cyan"
   },
   {
-    "id": "gemini",
-    "displayName": "Gemini CLI",
+    "id": "gemini-pro",
+    "displayName": "Gemini CLI Pro",
     "cmd": "gemini",
-    "args": ["-p", "{PROMPT}"],
+    "args": ["-p", "{PROMPT}", "-m", "gemini-2.5-pro"],
     "inputMode": "arg",
     "supportsSystemPrefix": true,
     "timeoutMs": 300000,
-    "avatar": "🔷",
+    "avatar": "💎",
     "color": "magenta"
+  },
+  {
+    "id": "gemini-flash",
+    "displayName": "Gemini CLI Flash",
+    "cmd": "gemini",
+    "args": ["-p", "{PROMPT}", "-m", "gemini-2.5-flash"],
+    "inputMode": "arg",
+    "supportsSystemPrefix": true,
+    "timeoutMs": 300000,
+    "avatar": "⚡",
+    "color": "yellow"
   },
   {
     "id": "codex",
@@ -31,5 +42,16 @@
     "timeoutMs": 300000,
     "avatar": "🧠",
     "color": "green"
+  },
+  {
+    "id": "qwen",
+    "displayName": "Qwen CLI",
+    "cmd": "qwen",
+    "args": ["-p", "{PROMPT}"],
+    "inputMode": "arg",
+    "supportsSystemPrefix": true,
+    "timeoutMs": 300000,
+    "avatar": "🌟",
+    "color": "blue"
   }
 ]
