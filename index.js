@@ -608,7 +608,7 @@ function buildPrompt(base, question, context = {}, agents = []) {
   if (prompt.includes('{{AGENTS}}')) {
     const agentList = JSON.stringify(agents.map(agent => ({
       agent_id: agent.id,
-      agent_display_name: `@${agent.displayName}`
+      agent_display_name: `🙌 ${agent.displayName}`
     })), null, 2);
     prompt = prompt.replace('{{AGENTS}}', agentList);
   }
@@ -1224,10 +1224,10 @@ async function runOrchestration(userQuestion, agents) {
 
           if (ownerAgent) {
             if (approves) {
-              LOGGER.line(ownerAgent, 'owner-approve', `I approve @${candDisplayName}'s proposal for consensus. During voting, I rated it ${ownerScore.toFixed(2)}/1.0, which meets the owner threshold of ${OWNER.minScore}.`);
+              LOGGER.line(ownerAgent, 'owner-approve', `I approve 🙌 ${candDisplayName}'s proposal for consensus. During voting, I rated it ${ownerScore.toFixed(2)}/1.0, which meets the owner threshold of ${OWNER.minScore}.`);
             } else {
               const scoreText = ownerScore === -Infinity ? 'did not vote' : `rated it ${ownerScore.toFixed(2)}/1.0`;
-              LOGGER.line(ownerAgent, 'owner-reject', `I reject @${candDisplayName}'s proposal for consensus. During voting, I ${scoreText}, which is below the required owner threshold of ${OWNER.minScore}.`);
+              LOGGER.line(ownerAgent, 'owner-reject', `I reject 🙌 ${candDisplayName}'s proposal for consensus. During voting, I ${scoreText}, which is below the required owner threshold of ${OWNER.minScore}.`);
             }
           }
         }

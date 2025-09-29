@@ -33,7 +33,7 @@ Return a single **strict JSON** object containing only critiques of other agents
         }
         /* additional critique points for the same agent */
       ],
-      "conversation_message": "<natural human-like message addressing the target agent that incorporates ALL the critique points above. Reference multiple claims if needed, and provide a comprehensive response with bullet points and line breaks for readability. Example: '@Agent Display Name, I have several concerns about your approach:\n\n• Regarding \"your streaming approach\" - COPY will abort on first bad row because PostgreSQL doesn't handle errors gracefully\n• About \"batch processing\" - this could lead to memory issues with large datasets\n\nMy suggestions: implement a validation layer before COPY and consider chunked processing with intermediate commits.'>"
+      "conversation_message": "<natural human-like message addressing the target agent that incorporates ALL the critique points above. Reference multiple claims if needed, and provide a comprehensive response with bullet points and line breaks for readability. Example: '🙌 Agent Display Name, I have several concerns about your approach:\n\n• Regarding \"your streaming approach\" - COPY will abort on first bad row because PostgreSQL doesn't handle errors gracefully\n• About \"batch processing\" - this could lead to memory issues with large datasets\n\nMy suggestions: implement a validation layer before COPY and consider chunked processing with intermediate commits.'>"
     }
     /* additional critique objects for other agents */
   ]

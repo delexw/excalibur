@@ -41,18 +41,18 @@ function highlightConversation(text, agents, noColor = false) {
       const displayName = agent.displayName || agent.id;
       const agentColor = agent.color || 'white';
 
-      // Highlight @mentions using the mentioned agent's color
-      const mentionPattern = new RegExp(`(@${displayName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'g');
+      // Highlight 🙌mentions using the mentioned agent's color
+      const mentionPattern = new RegExp(`(🙌 ${displayName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'g');
       text = text.replace(mentionPattern, ANSI.paint('$1', agentColor, noColor));
 
       // Highlight "You are absolutely right" or "you are absolutely right" when addressing this agent
-      const rightPattern = new RegExp(`(@${displayName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[^.]*?)([Yy]ou are absolutely right)`, 'g');
+      const rightPattern = new RegExp(`(🙌 ${displayName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[^.]*?)([Yy]ou are absolutely right)`, 'g');
       text = text.replace(rightPattern, (_, prefix, phrase) =>
         prefix + ANSI.boldify(ANSI.paint(phrase, agentColor, noColor), noColor)
       );
 
       // Highlight "However, I disagree with" or "however, I disagree with" when addressing this agent
-      const disagreePattern = new RegExp(`(@${displayName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[^.]*?)([Hh]owever, I disagree with)`, 'g');
+      const disagreePattern = new RegExp(`(🙌 ${displayName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[^.]*?)([Hh]owever, I disagree with)`, 'g');
       text = text.replace(disagreePattern, (_, prefix, phrase) =>
         prefix + ANSI.boldify(ANSI.paint(phrase, agentColor, noColor), noColor)
       );
