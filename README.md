@@ -8,7 +8,7 @@
 ███████╗██╔╝ ██╗╚██████╗██║  ██║███████╗██║██████╔╝╚██████╔╝██║  ██║
 ╚══════╝╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝╚══════╝╚═╝╚═════╝  ╚═════╝ ╚═╝  ╚═╝
 
-⚔️  EXCALIBUR CLI - Multi-Agent Orchestration Engine
+⚔️  EXCALIBUR CLI - Multi-Agent Debate Engine
 ```
 
 **Excalibur CLI** coordinates AI agents in structured debates to reach consensus on solutions. Features interactive terminal.
