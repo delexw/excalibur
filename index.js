@@ -33,6 +33,7 @@
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 // Additional imports to support file resolution and external helpers
 import { fileURLToPath } from 'node:url';
 import { ANSI, ConversationLogger } from './logger.js';
@@ -137,6 +138,12 @@ process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 // ----- CLI argument parsing -------------------------------------------------
 const argv = process.argv.slice(2);
 
+// Show config info if requested
+if (argv.includes('--config')) {
+  showConfigInfo();
+  process.exit(0);
+}
+
 // Show help if requested
 if (argv.includes('-h') || argv.includes('--help')) {
   console.log(`⚔️  Excalibur CLI - Multi-agent orchestration with debate and consensus
@@ -163,6 +170,7 @@ OPTIONS:
   --quiet               Suppress console output (still writes logs)
   --no-color            Disable ANSI color output
   --interactive         Start interactive terminal mode
+  --config              Show agent configuration info and file locations
   -h, --help            Show this help message
 
 EXAMPLES:
@@ -678,10 +686,85 @@ function validateAgents(agents) {
   }
 }
 
+// Get standard config file paths (Single Responsibility)
+function getConfigPaths() {
+  return {
+    userConfig: path.join(os.homedir(), '.excalibur', 'agents.json'),
+    cwdConfig: path.join(process.cwd(), 'agents.json'),
+    packageConfig: path.join(path.dirname(fileURLToPath(import.meta.url)), 'agents.json')
+  };
+}
+
+// Show configuration information (Interface Segregation)
+function showConfigInfo() {
+  const paths = getConfigPaths();
+  const currentConfig = (() => {
+    try {
+      return resolveConfigPath();
+    } catch {
+      return 'None found';
+    }
+  })();
+
+  console.log(`⚔️  Excalibur Configuration
+
+AGENTS CONFIG LOCATIONS (priority order):
+  1. ~/.excalibur/agents.json     ${fs.existsSync(paths.userConfig) ? '✅ Found' : '❌ Not found'}
+  2. ./agents.json (current dir)  ${fs.existsSync(paths.cwdConfig) ? '✅ Found' : '❌ Not found'}
+  3. Package directory            ${fs.existsSync(paths.packageConfig) ? '✅ Found' : '❌ Not found'}
+
+TO CONFIGURE AGENTS:
+  1. Edit ~/.excalibur/agents.json with your preferred agents
+  2. Or create ./agents.json in your project directory
+  3. Each agent needs: id, displayName, cmd, args, inputMode
+
+EXAMPLE:
+  [
+    {
+      "id": "claude",
+      "displayName": "Claude CLI",
+      "cmd": "claude",
+      "args": ["-p", "{PROMPT}"],
+      "inputMode": "arg"
+    }
+  ]
+
+Current config: ${currentConfig}
+`);
+}
+
+// Resolve which config file to use (Single Responsibility)
+function resolveConfigPath() {
+  const paths = getConfigPaths();
+
+  if (fs.existsSync(paths.userConfig)) {
+    return paths.userConfig;
+  }
+
+  if (fs.existsSync(paths.cwdConfig)) {
+    return paths.cwdConfig;
+  }
+
+  if (fs.existsSync(paths.packageConfig)) {
+    // Copy default to user directory for future editing (Open/Closed Principle)
+    try {
+      const userConfigDir = path.dirname(paths.userConfig);
+      fs.mkdirSync(userConfigDir, { recursive: true });
+      fs.copyFileSync(paths.packageConfig, paths.userConfig);
+      console.log('✅ Created editable config at ~/.excalibur/agents.json');
+    } catch (e) {
+      // Ignore copy errors (might not have write permissions)
+    }
+    return paths.packageConfig;
+  }
+
+  throw new Error('Missing agents.json - could not find in ~/.excalibur/, current directory, or package directory');
+}
+
 // Load agents from agents.json, assigning default avatars/colours if missing
 function loadAgents() {
-  const agentsPath = path.join(process.cwd(), 'agents.json');
-  if (!fs.existsSync(agentsPath)) throw new Error('Missing agents.json');
+  const agentsPath = resolveConfigPath();
+
   const list = JSON.parse(fs.readFileSync(agentsPath, 'utf8'));
   if (!Array.isArray(list) || list.length === 0) throw new Error('agents.json has no agents');
 

@@ -8,7 +8,8 @@
   },
   "type": "module",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "postinstall": "node scripts/postinstall.js"
   },
   "keywords": [
     "ai",
@@ -37,8 +38,10 @@
   "files": [
     "index.js",
     "logger.js",
+    "interactive.js",
     "agents.json",
     "prompts/",
+    "scripts/",
     "README.md",
     "CLAUDE.md"
   ],

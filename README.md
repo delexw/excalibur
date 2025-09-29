@@ -58,7 +58,27 @@ excalibur "Explain how to stream large CSVs into Postgres safely." --preset=team
 
 ## Configuration
 
-Agents are defined in `agents.json` with their CLI commands, timeouts, and display settings.
+### Agent Configuration
+
+Agents are defined in `agents.json` with their CLI commands, timeouts, and display settings. Excalibur looks for this file in the following order:
+
+1. `~/.excalibur/agents.json` (user config - **recommended for global installs**)
+2. `./agents.json` (current directory - for project-specific configs)
+3. Package directory (fallback default)
+
+When installed globally via `npm install -g excalibur`, the default config is automatically copied to `~/.excalibur/agents.json` for easy editing.
+
+**To configure your agents:**
+```bash
+# Show current config location and status
+excalibur --config
+
+# Edit your personal config (global install)
+open ~/.excalibur/agents.json
+
+# Or create a project-specific config
+cp ~/.excalibur/agents.json ./agents.json
+```
 
 ### Common Flags
 
