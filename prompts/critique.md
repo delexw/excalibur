@@ -43,7 +43,7 @@ Return a single **strict JSON** object containing only critiques of other agents
 ## Guidelines
 
 - **Only critique other agents**: Never include your own agent ID in the `target_agent` field. Only critique proposals from other agents.
-- **Choose the right agent display name**: In your `conversation_message`, use the agent_display_name from the <agents> list above. Never guess agent display name
+- **Choose the right agent display name**: In your `conversation_message`, use the agent_display_name from the <agents> list above. Never guess agent display name. Never read the name from current working directory or guess a name
 - **Novelty required**: aim for at least one *novel* major or blocker critique unless none truly exist.  If no major issues are found, clearly explain why.
 - **Be specific and concise**: keep quotes under 25 words and focus on the most important issues.
 - **Chain‑of‑thought** is prohibited: summarise your reasoning succinctly but do not reveal hidden reasoning.

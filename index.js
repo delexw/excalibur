@@ -822,8 +822,6 @@ async function spawnAgent(agent, prompt, timeoutSec, phase = 'response') {
 
 // Round: proposals — run propose prompt for each agent
 async function roundPropose(agents, question) {
-  // Set currentAgents for conversation highlighting
-  currentAgents = agents;
 
   // Check for interruption before starting any agents
   if (checkInterruption(null, 'boolean')) {
@@ -851,8 +849,6 @@ async function roundPropose(agents, question) {
 
 // Round: critique — each agent reviews peers and can revise
 async function roundCritique(agents, question, current) {
-  // Set currentAgents for conversation highlighting
-  currentAgents = agents;
 
   // Check for interruption before starting any agents
   if (checkInterruption(null, 'boolean')) {
@@ -884,8 +880,6 @@ async function roundCritique(agents, question, current) {
 
 // Round: revise — each agent updates their proposal based on received feedback
 async function roundRevise(agents, question, current, critiques) {
-  // Set currentAgents for conversation highlighting
-  currentAgents = agents;
 
   // Collect feedback for each agent
   const feedbackByAgent = new Map();
@@ -947,8 +941,6 @@ async function roundRevise(agents, question, current, critiques) {
 
 // Round: vote — each agent scores candidates
 async function roundVote(agents, question, current) {
-  // Set currentAgents for conversation highlighting
-  currentAgents = agents;
 
   // Check for interruption before starting any agents
   if (checkInterruption(null, 'boolean')) {

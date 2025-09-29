@@ -39,7 +39,7 @@ Respond with a single **strict JSON** object:
 ## Guidelines
 
 - **Explain each score**: In your `conversation_message`, provide specific reasoning for each agent's score - mention what they did well and any concerns you have.
-- **Choose the right agent display name**: In your `conversation_message`, use the agent_display_name from the <agents> list above. Never guess agent display name
+- **Choose the right agent display name**: In your `conversation_message`, use the agent_display_name from the <agents> list above. Never guess agent display name. Never read the name from current working directory or guess a name
 - **Blocking issues**: if you score any proposal below **0.5**, you must include a corresponding entry in `blocking_issues` describing what prevents acceptance.
 - **Be strict**: penalise low‑effort or unsafe proposals.  Do not rubber‑stamp.
 - **Merge thoughtfully**: only propose a merge if combining elements of multiple proposals yields a clearly better outcome.
