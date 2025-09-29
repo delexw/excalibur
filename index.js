@@ -76,8 +76,13 @@ function logAgentResponse(agent, json, phase) {
 
     case 'revision':
     case 'revise':
-      const revised = json.revised || json.proposal || json.answer || 'No revision provided';
-      LOGGER.line(agent, 'revision', `Revised proposal: ${revised}`);
+      const responses = json.response_to_feedback || [];
+      for (const response of responses) {
+        const conversationMsg = response.conversation_message;
+        if (conversationMsg) {
+          LOGGER.line(agent, 'revision', highlightConversation(conversationMsg, getAgentsForHighlighting()));
+        }
+      }
       break;
 
     case 'vote':
@@ -190,9 +195,9 @@ function strFlag(name, def) {
 }
 
 // Consensus mode (unanimous|super|majority); default super
-const consensusMode = strFlag('consensus', 'super');
+let consensusMode = strFlag('consensus', 'super');
 // Maximum critique/vote rounds; default 5
-const maxRounds = numFlag('maxRounds', 5);
+let maxRounds = numFlag('maxRounds', 5);
 
 // ----- Logging configuration -----------------------------------------------
 const LOG = {
@@ -219,7 +224,6 @@ const PROMPTS = {
 
 // Colour wrapper helpers using imported ANSI and the noColor flag
 const paint = (txt, colour) => ANSI.paint(txt, colour, LOG.noColor);
-const boldify = (txt) => ANSI.boldify(txt, LOG.noColor);
 
 // Helper to highlight conversation patterns with agent-aligned colors
 function highlightConversation(text, agents, noColor = LOG.noColor) {
@@ -309,6 +313,66 @@ const OWNER = {
   minScore: numFlag('ownerMin', 0.8),
   mode: (strFlag('ownerMode', 'any') === 'all' ? 'all' : 'any'),
 };
+
+/**
+ * Apply runtime configuration to global settings
+ * @param {Object} config - Configuration object from interactive mode
+ */
+function applyRuntimeConfig(config) {
+  if (!config) return;
+
+  // Core orchestration settings
+  if (config.consensus) {
+    consensusMode = config.consensus;
+  }
+  if (typeof config.maxRounds === 'number') {
+    maxRounds = config.maxRounds;
+  }
+
+  // Consensus thresholds
+  if (typeof config.unanimousPct === 'number') {
+    CONSENSUS.unanimousPct = config.unanimousPct;
+  }
+  if (typeof config.superMajorityPct === 'number') {
+    CONSENSUS.superMajorityPct = config.superMajorityPct;
+  }
+  if (typeof config.majorityPct === 'number') {
+    CONSENSUS.majorityPct = config.majorityPct;
+  }
+
+  // Behavioral controls
+  if (typeof config.allowBlockers === 'boolean') {
+    CONSENSUS.requireNoBlockers = !config.allowBlockers;
+  }
+  if (typeof config.rubberPenalty === 'number') {
+    DELIB.weightPenaltyRubberStamp = config.rubberPenalty;
+  }
+
+  // Owner approval settings
+  if (config.owner && Array.isArray(config.owner)) {
+    OWNER.ids = config.owner;
+  }
+  if (typeof config.ownerMin === 'number') {
+    OWNER.minScore = config.ownerMin;
+  }
+  if (config.ownerMode) {
+    OWNER.mode = config.ownerMode === 'all' ? 'all' : 'any';
+  }
+
+  // Logging settings (note: these affect the global LOG object)
+  if (config.logDir) {
+    LOG.dir = config.logDir;
+  }
+  if (config.sessionTag) {
+    LOG.session = config.sessionTag;
+  }
+  if (typeof config.quiet === 'boolean') {
+    LOG.quiet = config.quiet;
+  }
+  if (typeof config.noColor === 'boolean') {
+    LOG.noColor = config.noColor;
+  }
+}
 
 
 
@@ -634,7 +698,6 @@ async function roundPropose(agents, question) {
 
   const promises = agents.map(async (agent) => {
     const prompt = buildPrompt(PROMPTS.propose, question, {}, agents);
-    LOGGER.line(agent, 'prompt:propose', 'Sent proposal prompt');
     LOGGER.line(agent, 'prompt:full', prompt, true); // Log full prompt to file only
     const res = await spawnAgent(agent, prompt, 60, 'proposal');
     if (!res.ok) {
@@ -668,7 +731,6 @@ async function roundCritique(agents, question, current) {
     const otherProposals = current.filter(p => p.agentId !== agent.id).map(p => ({ agentId: p.agentId, ...p.payload }));
     const context = { proposals: otherProposals, your_original: orig };
     const prompt = buildPrompt(PROMPTS.critique, question, context, agents);
-    LOGGER.line(agent, 'prompt:critique', 'Sent critique prompt with peers');
     LOGGER.line(agent, 'prompt:full', prompt, true); // Log full prompt to file only
     const res = await spawnAgent(agent, prompt, 60, 'critique');
     if (!res.ok) {
@@ -722,8 +784,6 @@ async function roundRevise(agents, question, current, critiques) {
     const originalProposal = current.find(p => p.agentId === agent.id)?.payload || {};
 
     if (feedback.length === 0) {
-      // Log immediately for no feedback case using generic function
-      logAgentResponse(agent, { revised: originalProposal.proposal || 'No revision provided' }, 'revision');
       return { agentId: agent.id, res: { ok: true, json: { revised: originalProposal } } };
     }
 
@@ -732,7 +792,6 @@ async function roundRevise(agents, question, current, critiques) {
       feedback_received: feedback
     };
     const prompt = buildPrompt(PROMPTS.revise, question, context, agents);
-    LOGGER.line(agent, 'prompt:revise', 'Sent revision prompt with peer feedback');
     LOGGER.line(agent, 'prompt:full', prompt, true); // Log full prompt to file only
     const res = await spawnAgent(agent, prompt, 60, 'revision');
 
@@ -765,7 +824,6 @@ async function roundVote(agents, question, current) {
   const extras = { candidates: current.map(c => ({ agentId: c.agentId, payload: c.payload })) };
   const promises = agents.map(async (agent) => {
     const prompt = buildPrompt(PROMPTS.vote, question, extras, agents);
-    LOGGER.line(agent, 'prompt:vote', 'Sent vote prompt for candidates');
     LOGGER.line(agent, 'prompt:full', prompt, true); // Log full prompt to file only
     const res = await spawnAgent(agent, prompt, 60, 'vote');
     if (!res.ok) {
@@ -889,10 +947,12 @@ function consensusReached(avg, mode) {
 
     // Set up question handler to run orchestration
     interactive.setQuestionHandler(async (question, config) => {
-      // This will run the full orchestration for the question
       const agents = loadAgents();
 
       try {
+        // Apply runtime configuration from interactive mode
+        applyRuntimeConfig(config);
+
         // Run the full orchestration using the global LOGGER
         await runOrchestration(question, agents);
         return { success: true };
@@ -931,7 +991,6 @@ async function runOrchestration(userQuestion, agents) {
   LOGGER.line({ id: 'orchestrator', avatar: '🗂️', displayName: 'Orchestrator', color: 'white' }, 'question', userQuestion);
 
   // Add separator after thinking phase
-  console.log('');
 
   // Round 0: initial proposals
   LOGGER.blockTitle('Initial Proposals ......');
@@ -942,7 +1001,6 @@ async function runOrchestration(userQuestion, agents) {
   }
 
   // Add separator after thinking
-  console.log('');
 
   const r0 = await roundPropose(agents, userQuestion);
 
@@ -971,7 +1029,6 @@ async function runOrchestration(userQuestion, agents) {
     }
 
     // Add separator after thinking
-    console.log('');
 
     // Critique phase
     const crits = await roundCritique(agents, userQuestion, current);
@@ -990,13 +1047,11 @@ async function runOrchestration(userQuestion, agents) {
       seenPairs = seen;
     }
     // Revision phase - agents update their proposals based on feedback
-    console.log('');
     for (const agent of agents) {
       LOGGER.line(agent, 'thinking', 'Considering peer feedback...');
     }
 
     // Add separator after thinking
-    console.log('');
 
     const revisions = await roundRevise(agents, userQuestion, current, okCrits);
     const okRevisions = revisions.filter(r => r.res && r.res.ok);
@@ -1024,33 +1079,37 @@ async function runOrchestration(userQuestion, agents) {
     if (winner) {
       // Owner approval enforcement, if configured
       if (OWNER.ids.length) {
+        const orchestrator = { id: 'orchestrator', avatar: '🗂️', displayName: 'Orchestrator', color: 'gray' };
         const candId = winner.agentId;
         const raters = raterScores.get(candId) || new Map();
         const hits = OWNER.ids.filter(ownerId => (raters.get(ownerId) ?? -Infinity) >= OWNER.minScore);
         const ownersSatisfied = OWNER.mode === 'all' ? (hits.length === OWNER.ids.length) : (hits.length >= 1);
+
         if (!ownersSatisfied) {
-          console.log(paint(`\n🔒 Owner approval not satisfied for winner ${candId}. Required: ${OWNER.mode.toUpperCase()} of [${OWNER.ids.join(', ')}] with score ≥ ${OWNER.minScore}. Got approvals from [${hits.join(', ')}]. Continuing rounds...\n`, 'yellow'));
+          LOGGER.line(orchestrator, 'owner-reject', `Owner approval not satisfied for winner ${candId}. Required: ${OWNER.mode.toUpperCase()} of [${OWNER.ids.join(', ')}] with score ≥ ${OWNER.minScore}. Got approvals from [${hits.join(', ')}]. Continuing rounds...`);
           continue;
         }
         else {
-          console.log(paint(`\n🔒 Owner approval satisfied for winner ${candId}. Continuing rounds...\n`, 'green'));
+          LOGGER.line(orchestrator, 'owner-approve', `Owner approval satisfied for winner ${candId}. Declaring consensus...`);
         }
       }
       // Consensus achieved
       const winnerPayload = current.find(c => c.agentId === winner.agentId)?.payload;
-      console.log('\n✅ CONSENSUS REACHED on', winner.agentId, `(avg=${winner.avg.toFixed(2)})\n`);
-      console.log('===== FINAL ANSWER =====\n');
-      console.log(winnerPayload.proposal || '(no proposal)');
+
+      LOGGER.line(orchestrator, 'consensus', `✅ CONSENSUS REACHED on ${winner.agentId} (avg=${winner.avg.toFixed(2)})`);
+      LOGGER.line(orchestrator, 'final-answer', '===== FINAL ANSWER =====');
+      LOGGER.line(orchestrator, 'proposal', winnerPayload.proposal || '(no proposal)');
+
       if (winnerPayload.code_patch) {
-        console.log('\n--- code_patch (unified diff) ---\n');
-        console.log(winnerPayload.code_patch);
+        LOGGER.line(orchestrator, 'code-patch', '--- code_patch (unified diff) ---');
+        LOGGER.line(orchestrator, 'code-patch', winnerPayload.code_patch);
       }
       if (winnerPayload.tests && winnerPayload.tests.length) {
-        console.log('\nTests to run:\n- ' + winnerPayload.tests.join('\n- '));
+        LOGGER.line(orchestrator, 'tests', 'Tests to run:\n- ' + winnerPayload.tests.join('\n- '));
       }
-      console.log('\nKey points:\n- ' + (winnerPayload.key_points || []).join('\n- '));
-      console.log('\nConfidence:', winnerPayload.confidence || 'low');
-      console.log('\n========================\n');
+      LOGGER.line(orchestrator, 'summary', 'Key points:\n- ' + (winnerPayload.key_points || []).join('\n- '));
+      LOGGER.line(orchestrator, 'confidence', 'Confidence: ' + (winnerPayload.confidence || 'low'));
+      LOGGER.line(orchestrator, 'final-answer', '========================');
       // Build scorecards summary
       const scorecards = agents.map(a => {
         const nov = okCrits.find(x => x.agentId === a.id)?.res.json?.critiques?.length || 0;
@@ -1081,7 +1140,6 @@ async function runOrchestration(userQuestion, agents) {
   }
 
   // Add separator after thinking
-  console.log('');
 
   // Recompute votes to show final ranking
   const finalVotes = await roundVote(agents, userQuestion, current);
@@ -1093,20 +1151,23 @@ async function runOrchestration(userQuestion, agents) {
   }
   const top = finalAvg[0];
   const winnerPayload = current.find(c => c.agentId === top.agentId)?.payload;
-  console.log('\n⚖️  No consensus. Selecting highest scoring proposal.\n');
-  console.log('===== FINAL (NO CONSENSUS) =====\n');
-  console.log(winnerPayload.proposal || '(no proposal)');
+  const orchestrator = { id: 'orchestrator', avatar: '🗂️', displayName: 'Orchestrator', color: 'white' };
+
+  LOGGER.line(orchestrator, 'no-consensus', '⚖️  No consensus. Selecting highest scoring proposal.');
+  LOGGER.line(orchestrator, 'final-answer', '===== FINAL (NO CONSENSUS) =====');
+  LOGGER.line(orchestrator, 'proposal', winnerPayload.proposal || '(no proposal)');
+
   if (winnerPayload.code_patch) {
-    console.log('\n--- code_patch (unified diff) ---\n');
-    console.log(winnerPayload.code_patch);
+    LOGGER.line(orchestrator, 'code-patch', '--- code_patch (unified diff) ---');
+    LOGGER.line(orchestrator, 'code-patch', winnerPayload.code_patch);
   }
   if (winnerPayload.tests && winnerPayload.tests.length) {
-    console.log('\nTests to run:\n- ' + winnerPayload.tests.join('\n- '));
+    LOGGER.line(orchestrator, 'tests', 'Tests to run:\n- ' + winnerPayload.tests.join('\n- '));
   }
-  console.log('\nRankings:', finalAvg.map(x => `${x.agentId}:${x.avg.toFixed(2)}`).join('  '));
+  LOGGER.line(orchestrator, 'rankings', 'Rankings: ' + finalAvg.map(x => `${x.agentId}:${x.avg.toFixed(2)}`).join('  '));
   // Collect dissent notes from blockers map if available
   // (Simplified: could list issues but not computed here)
-  console.log('\n===============================\n');
+  LOGGER.line(orchestrator, 'final-answer', '===============================');
   // Build scorecards summary for fallback case (counts zero for critiques)
   const scorecards = agents.map(a => ({
     agentId: a.id,
