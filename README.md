@@ -68,9 +68,52 @@ Agents are defined in `agents.json` with their CLI commands, timeouts, and displ
 | `--consensus=MODE` | `unanimous`, `super` or `majority` (default `super`) |
 | `--preset=NAME` | Apply preset: `strict`, `default`, `fast`, `experiment`, `team` |
 | `--owner=ID1,ID2` | Require specific agents to approve winner |
+| `--ownerMin=N` | Minimum score threshold for owner approval (default 0.8) |
+| `--ownerMode=MODE` | Owner approval mode: `any` or `all` (default `any`) |
 | `--logDir=DIR` | Directory for logs (default `logs`) |
 | `--quiet` | Suppress console output |
 | `--no-color` | Disable ANSI colors |
+
+### Owner Approval System
+
+The owner approval system adds an additional quality gate after consensus is reached. Even if agents reach consensus on a winner, designated "owner" agents must have personally rated the winning proposal above a minimum threshold during the voting phase.
+
+#### Configuration
+
+```bash
+# Require Claude to approve the winner with at least 0.8 score
+node index.js "Your question" --owner=claude --ownerMin=0.8
+
+# Require both Claude and Gemini to approve (all mode)
+node index.js "Your question" --owner=claude,gemini --ownerMode=all --ownerMin=0.85
+
+# Interactive mode: Configure via settings and save to config
+node index.js
+# Use /config command to set owner preferences
+```
+
+#### How It Works
+
+1. **Voting Phase**: All agents (including owners) vote on proposals
+2. **Consensus Check**: System determines if there's a winning proposal
+3. **Owner Validation**: If owners are configured, the system checks:
+   - Did the owner agent vote during the voting phase?
+   - Did they score the winning proposal ≥ `ownerMin` threshold?
+4. **Approval Decision**:
+   - `ownerMode=any`: At least one owner must approve
+   - `ownerMode=all`: All designated owners must approve
+
+#### Example Output
+
+When owner approval is being evaluated, you'll see detailed logging from each owner agent:
+
+```
+│ [owner-approve] 🦉 Claude CLI ➤ I approve codex's proposal for consensus. During voting, I rated it 0.92/1.0, which meets the owner threshold of 0.8.
+
+│ [owner-reject] 💎 Gemini CLI Pro ➤ I reject codex's proposal for consensus. During voting, I rated it 0.75/1.0, which is below the required owner threshold of 0.8.
+```
+
+This ensures that designated "expert" agents must have personally endorsed the winning solution during the democratic voting process, adding an extra layer of quality assurance to the consensus mechanism.
 
 ## Development
 
