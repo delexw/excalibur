@@ -50,6 +50,59 @@ global.orchestrationInterrupted = false;
 // Constant for interruption error message
 const INTERRUPTION_ERROR = 'Interrupted by user';
 
+// Generic function to log agent responses immediately based on phase
+function logAgentResponse(agent, json, phase) {
+  switch (phase) {
+    case 'proposal':
+    case 'propose':
+      const proposal = json.proposal || json.answer || 'No proposal provided';
+      const confidence = json.confidence ? ` I'm ${json.confidence} confident about this.` : '';
+      LOGGER.line(agent, 'proposal', `My proposal: ${proposal}${confidence}`);
+      break;
+
+    case 'critique':
+      const critiques = json.critiques || [];
+      if (critiques.length > 0) {
+        for (const c of critiques) {
+          const conversationMsg = c.conversation_message;
+          if (conversationMsg) {
+            LOGGER.line(agent, 'critique', highlightConversation(conversationMsg, getAgentsForHighlighting()));
+          }
+        }
+      } else {
+        LOGGER.line(agent, 'critique', 'The current proposals look solid to me.');
+      }
+      break;
+
+    case 'revision':
+    case 'revise':
+      const revised = json.revised || json.proposal || json.answer || 'No revision provided';
+      LOGGER.line(agent, 'revision', `Revised proposal: ${revised}`);
+      break;
+
+    case 'vote':
+      const conversationMsg = json.conversation_message;
+      if (conversationMsg) {
+        LOGGER.line(agent, 'vote', highlightConversation(conversationMsg, getAgentsForHighlighting()));
+      } else {
+        LOGGER.line(agent, 'error', 'Missing conversation_message for vote response');
+      }
+      break;
+
+    default:
+      // Generic fallback - try to find any meaningful content
+      const content = json.proposal || json.answer || json.response || json.content || JSON.stringify(json);
+      LOGGER.line(agent, phase, content);
+      break;
+  }
+}
+
+// Helper to get agents for conversation highlighting (will be set by round functions)
+let currentAgents = [];
+function getAgentsForHighlighting() {
+  return currentAgents;
+}
+
 // Helper function to check for interruption and return consistent error result
 function checkInterruption(agent, format = 'spawn') {
   if (!global.orchestrationInterrupted) {
@@ -444,7 +497,7 @@ function loadAgents() {
 }
 
 // Spawn an agent CLI process with prompt; return JSON output or error (single attempt)
-async function spawnAgentOnce(agent, prompt, timeoutSec) {
+async function spawnAgentOnce(agent, prompt, timeoutSec, phase = 'response') {
   return new Promise((resolve) => {
     let resolved = false;
 
@@ -508,6 +561,10 @@ async function spawnAgentOnce(agent, prompt, timeoutSec) {
             const normalizedJsonText = normalizeJsonText(stdout);
             const json = JSON.parse(normalizedJsonText);
             LOGGER.line(agent, 'response:json', normalizedJsonText, true); // Log JSON response to file only
+
+            // Log the response immediately - generic for any phase
+            logAgentResponse(agent, json, phase);
+
             resolve({ ok: true, json, raw: stdout });
           } catch (parseErr) {
             resolve({ ok: false, error: `Non‑JSON or parse error from ${agent.id}: ${parseErr.message}`, raw: parseErr });
@@ -521,7 +578,7 @@ async function spawnAgentOnce(agent, prompt, timeoutSec) {
 }
 
 // Spawn an agent CLI process with retry logic for failed attempts
-async function spawnAgent(agent, prompt, timeoutSec) {
+async function spawnAgent(agent, prompt, timeoutSec, phase = 'response') {
   const maxRetries = 3; // Retry Claude CLI calls, others once only
   const baseDelay = 1000; // 1 second base delay
 
@@ -534,7 +591,7 @@ async function spawnAgent(agent, prompt, timeoutSec) {
       return interruption;
     }
 
-    const result = await spawnAgentOnce(agent, prompt, timeoutSec);
+    const result = await spawnAgentOnce(agent, prompt, timeoutSec, phase);
     lastResult = result;
 
     if (result.ok) {
@@ -542,10 +599,6 @@ async function spawnAgent(agent, prompt, timeoutSec) {
         LOGGER.line(agent, 'retry:success', `Succeeded on attempt ${attempt}/${maxRetries}`, true);
       }
 
-      // Log the response immediately for immediate output
-      const proposal = result.json.proposal || result.json.answer || 'No response provided';
-      const confidence = result.json.confidence ? ` I'm ${result.json.confidence} confident about this.` : '';
-      LOGGER.line(agent, 'response', `${proposal}${confidence}`);
 
       return result;
     }
@@ -570,6 +623,9 @@ async function spawnAgent(agent, prompt, timeoutSec) {
 
 // Round: proposals — run propose prompt for each agent
 async function roundPropose(agents, question) {
+  // Set currentAgents for conversation highlighting
+  currentAgents = agents;
+
   // Check for interruption before starting any agents
   if (checkInterruption(null, 'boolean')) {
     // Don't start any agents if already interrupted
@@ -580,7 +636,7 @@ async function roundPropose(agents, question) {
     const prompt = buildPrompt(PROMPTS.propose, question, {}, agents);
     LOGGER.line(agent, 'prompt:propose', 'Sent proposal prompt');
     LOGGER.line(agent, 'prompt:full', prompt, true); // Log full prompt to file only
-    const res = await spawnAgent(agent, prompt, 60);
+    const res = await spawnAgent(agent, prompt, 60, 'proposal');
     if (!res.ok) {
       // Don't log interruption errors to keep ESC clean
       if (res.error !== INTERRUPTION_ERROR) {
@@ -588,7 +644,7 @@ async function roundPropose(agents, question) {
       }
       return { agentId: agent.id, error: res.error, raw: res.raw };
     }
-    // Response already logged in spawnAgent
+    // Response logging is handled in logAgentResponse
     return { agentId: agent.id, res };
   });
 
@@ -597,6 +653,9 @@ async function roundPropose(agents, question) {
 
 // Round: critique — each agent reviews peers and can revise
 async function roundCritique(agents, question, current) {
+  // Set currentAgents for conversation highlighting
+  currentAgents = agents;
+
   // Check for interruption before starting any agents
   if (checkInterruption(null, 'boolean')) {
     // Don't start any agents if already interrupted
@@ -611,7 +670,7 @@ async function roundCritique(agents, question, current) {
     const prompt = buildPrompt(PROMPTS.critique, question, context, agents);
     LOGGER.line(agent, 'prompt:critique', 'Sent critique prompt with peers');
     LOGGER.line(agent, 'prompt:full', prompt, true); // Log full prompt to file only
-    const res = await spawnAgent(agent, prompt, 60);
+    const res = await spawnAgent(agent, prompt, 60, 'critique');
     if (!res.ok) {
       // Don't log interruption errors to keep ESC clean
       if (res.error !== INTERRUPTION_ERROR) {
@@ -619,22 +678,7 @@ async function roundCritique(agents, question, current) {
       }
       return { agentId: agent.id, error: res.error, raw: res.raw };
     }
-    const critiques = res.json.critiques || [];
-    const nCrit = critiques.length;
-
-    if (nCrit > 0) {
-      // Use conversation messages directly from JSON response with highlighting
-      for (const c of critiques) {
-        const conversationMsg = c.conversation_message;
-        if (conversationMsg) {
-          LOGGER.line(agent, 'critique', highlightConversation(conversationMsg, agents));
-        } else {
-          LOGGER.line(agent, 'error', `Missing conversation_message for critique of ${c.target_agent}`);
-        }
-      }
-    } else {
-      LOGGER.line(agent, 'critique', 'The current proposals look solid to me.');
-    }
+    // Critique logging is handled in logAgentResponse
     return { agentId: agent.id, res };
   });
 
@@ -643,6 +687,9 @@ async function roundCritique(agents, question, current) {
 
 // Round: revise — each agent updates their proposal based on received feedback
 async function roundRevise(agents, question, current, critiques) {
+  // Set currentAgents for conversation highlighting
+  currentAgents = agents;
+
   // Collect feedback for each agent
   const feedbackByAgent = new Map();
   for (const crit of critiques.filter(c => c.res && c.res.ok)) {
@@ -675,7 +722,8 @@ async function roundRevise(agents, question, current, critiques) {
     const originalProposal = current.find(p => p.agentId === agent.id)?.payload || {};
 
     if (feedback.length === 0) {
-      LOGGER.line(agent, 'revision', 'No feedback received, keeping original proposal.');
+      // Log immediately for no feedback case using generic function
+      logAgentResponse(agent, { revised: originalProposal.proposal || 'No revision provided' }, 'revision');
       return { agentId: agent.id, res: { ok: true, json: { revised: originalProposal } } };
     }
 
@@ -686,7 +734,7 @@ async function roundRevise(agents, question, current, critiques) {
     const prompt = buildPrompt(PROMPTS.revise, question, context, agents);
     LOGGER.line(agent, 'prompt:revise', 'Sent revision prompt with peer feedback');
     LOGGER.line(agent, 'prompt:full', prompt, true); // Log full prompt to file only
-    const res = await spawnAgent(agent, prompt, 60);
+    const res = await spawnAgent(agent, prompt, 60, 'revision');
 
     if (!res.ok) {
       // Don't log interruption errors to keep ESC clean
@@ -696,33 +744,7 @@ async function roundRevise(agents, question, current, critiques) {
       return { agentId: agent.id, error: res.error, raw: res.raw };
     }
 
-    const revised = res.json.revised;
-    const responses = res.json.response_to_feedback || [];
-
-    // Use conversation messages directly from JSON response with highlighting
-    for (const response of responses) {
-      const conversationMsg = response.conversation_message;
-      if (conversationMsg) {
-        LOGGER.line(agent, 'revision', highlightConversation(conversationMsg, agents));
-      } else {
-        LOGGER.line(agent, 'error', `Missing conversation_message for response to ${response.critic_agent}`);
-      }
-    }
-
-    // Summary message
-    if (revised && revised.proposal && revised.proposal !== 'no change') {
-      const accepted = responses.filter(r => r.action_taken === 'revised' || r.feedback_accepted).length;
-      const rejected = responses.filter(r => r.action_taken === 'rejected' || r.feedback_rejected).length;
-
-      if (responses.length > 1) {
-        LOGGER.line(agent, 'revision', `Overall: Updated my proposal based on ${accepted} accepted suggestions.`);
-      }
-    } else {
-      if (responses.length > 1) {
-        LOGGER.line(agent, 'revision', 'Overall: Keeping my original proposal after reviewing all feedback.');
-      }
-    }
-
+    // Revision logging is handled in logAgentResponse
     return { agentId: agent.id, res };
   });
 
@@ -731,6 +753,9 @@ async function roundRevise(agents, question, current, critiques) {
 
 // Round: vote — each agent scores candidates
 async function roundVote(agents, question, current) {
+  // Set currentAgents for conversation highlighting
+  currentAgents = agents;
+
   // Check for interruption before starting any agents
   if (checkInterruption(null, 'boolean')) {
     // Don't start any agents if already interrupted
@@ -742,7 +767,7 @@ async function roundVote(agents, question, current) {
     const prompt = buildPrompt(PROMPTS.vote, question, extras, agents);
     LOGGER.line(agent, 'prompt:vote', 'Sent vote prompt for candidates');
     LOGGER.line(agent, 'prompt:full', prompt, true); // Log full prompt to file only
-    const res = await spawnAgent(agent, prompt, 60);
+    const res = await spawnAgent(agent, prompt, 60, 'vote');
     if (!res.ok) {
       // Don't log interruption errors to keep ESC clean
       if (res.error !== INTERRUPTION_ERROR) {
@@ -750,12 +775,7 @@ async function roundVote(agents, question, current) {
       }
       return { agentId: agent.id, error: res.error, raw: res.raw };
     }
-    const conversationMsg = res.json.conversation_message;
-    if (conversationMsg) {
-      LOGGER.line(agent, 'vote', highlightConversation(conversationMsg, agents));
-    } else {
-      LOGGER.line(agent, 'error', 'Missing conversation_message for vote response');
-    }
+    // Vote logging is handled in logAgentResponse
     return { agentId: agent.id, res };
   });
 
@@ -1011,6 +1031,9 @@ async function runOrchestration(userQuestion, agents) {
         if (!ownersSatisfied) {
           console.log(paint(`\n🔒 Owner approval not satisfied for winner ${candId}. Required: ${OWNER.mode.toUpperCase()} of [${OWNER.ids.join(', ')}] with score ≥ ${OWNER.minScore}. Got approvals from [${hits.join(', ')}]. Continuing rounds...\n`, 'yellow'));
           continue;
+        }
+        else {
+          console.log(paint(`\n🔒 Owner approval satisfied for winner ${candId}. Continuing rounds...\n`, 'green'));
         }
       }
       // Consensus achieved

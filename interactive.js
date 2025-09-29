@@ -1,4 +1,7 @@
 import readline from 'node:readline';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
 import { ANSI } from './logger.js';
 
 // SOLID Principle: Single Responsibility - Each class has one clear purpose
@@ -189,7 +192,8 @@ export class TerminalDisplay {
 export class SessionManager {
   constructor() {
     this.history = [];
-    this.config = {
+    this.configPath = path.join(process.cwd(), '.excalibur', 'config.json');
+    this.defaultConfig = {
       // Core orchestration settings
       preset: 'team',
       consensus: 'super',
@@ -215,7 +219,11 @@ export class SessionManager {
       quiet: false,
       noColor: false
     };
+    this.config = { ...this.defaultConfig };
     this.agents = [];
+
+    // Load persistent configuration
+    this.loadConfig();
   }
 
   addToHistory(command, result) {
@@ -226,9 +234,41 @@ export class SessionManager {
     });
   }
 
+  loadConfig() {
+    try {
+      if (fs.existsSync(this.configPath)) {
+        const savedConfig = JSON.parse(fs.readFileSync(this.configPath, 'utf8'));
+        this.config = { ...this.defaultConfig, ...savedConfig };
+        // Only show loading message in debug/verbose mode
+        // console.log(`📁 Loaded configuration from ${this.configPath}`);
+      }
+    } catch (error) {
+      console.warn(`⚠️  Failed to load config: ${error.message}`);
+      this.config = { ...this.defaultConfig };
+    }
+  }
+
+  saveConfig() {
+    try {
+      // Ensure .excalibur directory exists
+      const configDir = path.dirname(this.configPath);
+      if (!fs.existsSync(configDir)) {
+        fs.mkdirSync(configDir, { recursive: true });
+      }
+
+      fs.writeFileSync(this.configPath, JSON.stringify(this.config, null, 2));
+      console.log(`💾 Configuration saved to ${this.configPath}`);
+      return true;
+    } catch (error) {
+      console.error(`❌ Failed to save config: ${error.message}`);
+      return false;
+    }
+  }
+
   updateConfig(key, value) {
     if (this.config.hasOwnProperty(key)) {
       this.config[key] = value;
+      this.saveConfig(); // Auto-save on update
       return true;
     }
     return false;
@@ -458,6 +498,7 @@ export class InteractiveTerminal {
       }
     }
 
+    console.log(ANSI.paint(`\n💾 Configuration saved to: ${this.sessionManager.configPath}`, 'gray', this.display.noColor));
     console.log(ANSI.paint('\n💡 Usage: /config <key> <value> to change settings', 'gray', this.display.noColor));
     console.log(ANSI.paint('  Examples:', 'gray', this.display.noColor));
     console.log(ANSI.paint('    /config maxRounds 3', 'gray', this.display.noColor));
