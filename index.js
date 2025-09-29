@@ -1078,19 +1078,33 @@ async function runOrchestration(userQuestion, agents) {
     const winner = consensusReached(avg, consensusMode);
     if (winner) {
       // Owner approval enforcement, if configured
+      const orchestrator = { id: 'orchestrator', avatar: '🗂️', displayName: 'Orchestrator', color: 'gray' };
+
       if (OWNER.ids.length) {
-        const orchestrator = { id: 'orchestrator', avatar: '🗂️', displayName: 'Orchestrator', color: 'gray' };
         const candId = winner.agentId;
         const raters = raterScores.get(candId) || new Map();
+
+        // Log each owner's decision
+        for (const ownerId of OWNER.ids) {
+          const ownerAgent = agents.find(a => a.id === ownerId);
+          const ownerScore = raters.get(ownerId) ?? -Infinity;
+          const approves = ownerScore >= OWNER.minScore;
+
+          if (ownerAgent) {
+            if (approves) {
+              LOGGER.line(ownerAgent, 'owner-approve', `I approve ${candId}'s proposal for consensus. During voting, I rated it ${ownerScore.toFixed(2)}/1.0, which meets the owner threshold of ${OWNER.minScore}.`);
+            } else {
+              const scoreText = ownerScore === -Infinity ? 'did not vote' : `rated it ${ownerScore.toFixed(2)}/1.0`;
+              LOGGER.line(ownerAgent, 'owner-reject', `I reject ${candId}'s proposal for consensus. During voting, I ${scoreText}, which is below the required owner threshold of ${OWNER.minScore}.`);
+            }
+          }
+        }
+
         const hits = OWNER.ids.filter(ownerId => (raters.get(ownerId) ?? -Infinity) >= OWNER.minScore);
         const ownersSatisfied = OWNER.mode === 'all' ? (hits.length === OWNER.ids.length) : (hits.length >= 1);
 
         if (!ownersSatisfied) {
-          LOGGER.line(orchestrator, 'owner-reject', `Owner approval not satisfied for winner ${candId}. Required: ${OWNER.mode.toUpperCase()} of [${OWNER.ids.join(', ')}] with score ≥ ${OWNER.minScore}. Got approvals from [${hits.join(', ')}]. Continuing rounds...`);
           continue;
-        }
-        else {
-          LOGGER.line(orchestrator, 'owner-approve', `Owner approval satisfied for winner ${candId}. Declaring consensus...`);
         }
       }
       // Consensus achieved
