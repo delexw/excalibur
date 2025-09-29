@@ -51,3 +51,4 @@ Return a single **strict JSON** object with your revised proposal:
 - **Be honest about no-change**: If no feedback warranted changes, use "no change" and explain your reasoning
 - **Quality over consensus**: A technically superior solution defended with good reasoning is better than changes made just to satisfy others
 - **Align conversation_message**: The conversation_message must be consistent with the structured fields (critic_agent, feedback_accepted, feedback_rejected, action_taken). Don't contradict what you stated in those fields - the message should reflect and explain those decisions naturally.
+- **Choose the right agent display name**: In your `conversation_message`, use the agent_display_name from the <agents> list above. Never guess agent display name
