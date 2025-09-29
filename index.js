@@ -315,6 +315,178 @@ const OWNER = {
 };
 
 /**
+ * Build comprehensive scorecards for all agents
+ * @param {Array} agents - Array of agent objects
+ * @param {Array} okCrits - Valid critique responses
+ * @param {Array} okVotes - Valid vote responses
+ * @param {Map} raterScores - Map of agent scores
+ * @param {Array} avg - Final consensus averages
+ * @returns {Array} Array of scorecard objects
+ */
+function buildScorecards(agents, okCrits, okVotes, raterScores, avg) {
+  return agents.map(a => {
+    // Critique analysis
+    const critResponse = okCrits.find(x => x.agentId === a.id);
+    const novelCritiques = critResponse?.res.json?.critiques?.length || 0;
+    const blockerCount = critResponse?.res.json?.critiques?.reduce((count, c) =>
+      count + (c.points?.filter(p => p.severity === 'blocker').length || 0), 0) || 0;
+
+    // Voting analysis
+    const voteResponse = okVotes.find(x => x.agentId === a.id);
+    const participated = {
+      critique: !!critResponse,
+      vote: !!voteResponse
+    };
+
+    // Rubber stamp detection (voted without critiquing)
+    const isRubberStamp = !critResponse && !!voteResponse;
+
+    // Peer scoring analysis
+    const agentRaters = raterScores.get(a.id) || new Map();
+    const peerScores = Array.from(agentRaters.values()).filter(score => score !== -Infinity);
+    const avgPeerScore = peerScores.length > 0 ?
+      peerScores.reduce((sum, score) => sum + score, 0) / peerScores.length : null;
+
+    // Final proposal score in the consensus ranking
+    const finalRanking = avg.findIndex(entry => entry.agentId === a.id) + 1;
+    const finalScore = avg.find(entry => entry.agentId === a.id)?.avg || null;
+
+    return {
+      agentId: a.id,
+      displayName: a.displayName,
+      avatar: a.avatar,
+      novelCritiques,
+      blockerCount,
+      isRubberStamp,
+      participated,
+      avgPeerScore: avgPeerScore ? parseFloat(avgPeerScore.toFixed(3)) : null,
+      finalScore: finalScore ? parseFloat(finalScore.toFixed(3)) : null,
+      finalRanking: finalRanking <= avg.length ? finalRanking : null,
+      peerVoteCount: peerScores.length
+    };
+  });
+}
+
+/**
+ * Build proposal sections (code, tests, key points, confidence)
+ * @param {Object} payload - Proposal payload
+ * @param {boolean} includeMetrics - Whether to include confidence and key points
+ * @returns {Array} Array of result lines
+ */
+function buildProposalSections(payload, includeMetrics = true) {
+  const sections = [];
+
+  sections.push(payload.proposal || '(no proposal)');
+
+  if (payload.code_patch) {
+    sections.push('');
+    sections.push('--- code_patch (unified diff) ---');
+    sections.push(payload.code_patch);
+  }
+
+  if (payload.tests && payload.tests.length) {
+    sections.push('');
+    sections.push('Tests to run:');
+    payload.tests.forEach(test => sections.push(`- ${test}`));
+  }
+
+  if (includeMetrics) {
+    if (payload.key_points && payload.key_points.length) {
+      sections.push('');
+      sections.push('Key points:');
+      payload.key_points.forEach(point => sections.push(`- ${point}`));
+    }
+
+    sections.push('');
+    sections.push(`Confidence: ${payload.confidence || 'low'}`);
+  }
+
+  return sections;
+}
+
+/**
+ * Build formatted result message
+ * @param {Object} options - Configuration object
+ * @param {string} options.header - Header message
+ * @param {string} options.title - Title section
+ * @param {Object} options.payload - Winner's proposal payload
+ * @param {string} options.footer - Footer section
+ * @param {Array} [options.rankings] - Final rankings array
+ * @param {boolean} [options.includeMetrics=true] - Include confidence and key points
+ * @returns {string} Complete formatted result message
+ */
+function buildResultMessage({ header, title, payload, footer, rankings, includeMetrics = true }) {
+  const result = [];
+
+  result.push(header);
+  result.push('');
+  result.push(title);
+  result.push('');
+
+  result.push(...buildProposalSections(payload, includeMetrics));
+
+  if (rankings) {
+    result.push('');
+    result.push('Rankings: ' + rankings.map(x => `${x.agentId}:${x.avg.toFixed(2)}`).join('  '));
+  }
+
+  result.push('');
+  result.push(footer);
+
+  return result.join('\n');
+}
+
+/**
+ * Build formatted final result message
+ * @param {Object} winner - Winner object with agentId and avg
+ * @param {Object} winnerPayload - Winner's proposal payload
+ * @returns {string} Complete final result message
+ */
+function buildFinalResult(winner, winnerPayload) {
+  return buildResultMessage({
+    header: `✅ CONSENSUS REACHED on ${winner.agentId} (avg=${winner.avg.toFixed(2)})`,
+    title: '===== FINAL ANSWER =====',
+    payload: winnerPayload,
+    footer: '========================'
+  });
+}
+
+/**
+ * Build formatted no-consensus result message
+ * @param {Object} winnerPayload - Top candidate's proposal payload
+ * @param {Array} finalAvg - Final average scores array
+ * @returns {string} Complete no-consensus result message
+ */
+function buildNoConsensusResult(winnerPayload, finalAvg) {
+  return buildResultMessage({
+    header: '⚖️  No consensus. Selecting highest scoring proposal.',
+    title: '===== FINAL (NO CONSENSUS) =====',
+    payload: winnerPayload,
+    footer: '===============================',
+    rankings: finalAvg,
+    includeMetrics: false
+  });
+}
+
+/**
+ * Complete orchestration session with result logging and scorecards
+ * @param {Object} orchestrator - Orchestrator agent object
+ * @param {string} resultMessage - Final result message to log
+ * @param {string} logPhase - Log phase for the result message
+ * @param {Array} agents - Array of agent objects
+ * @param {Array} okCrits - Valid critique responses
+ * @param {Array} okVotes - Valid vote responses
+ * @param {Map} raterScores - Map of agent scores
+ * @param {Array} avg - Final consensus averages
+ */
+function completeOrchestration(orchestrator, resultMessage, logPhase, agents, okCrits, okVotes, raterScores, avg) {
+  LOGGER.line(orchestrator, logPhase, resultMessage);
+  const scorecards = buildScorecards(agents, okCrits, okVotes, raterScores, avg);
+  LOGGER.summary(scorecards);
+  LOGGER.end();
+}
+
+/**
  * Apply runtime configuration to global settings
  * @param {Object} config - Configuration object from interactive mode
  */
@@ -1110,38 +1282,9 @@ async function runOrchestration(userQuestion, agents) {
       // Consensus achieved
       const winnerPayload = current.find(c => c.agentId === winner.agentId)?.payload;
 
-      LOGGER.line(orchestrator, 'consensus', `✅ CONSENSUS REACHED on ${winner.agentId} (avg=${winner.avg.toFixed(2)})`);
-      LOGGER.line(orchestrator, 'final-answer', '===== FINAL ANSWER =====');
-      LOGGER.line(orchestrator, 'proposal', winnerPayload.proposal || '(no proposal)');
-
-      if (winnerPayload.code_patch) {
-        LOGGER.line(orchestrator, 'code-patch', '--- code_patch (unified diff) ---');
-        LOGGER.line(orchestrator, 'code-patch', winnerPayload.code_patch);
-      }
-      if (winnerPayload.tests && winnerPayload.tests.length) {
-        LOGGER.line(orchestrator, 'tests', 'Tests to run:\n- ' + winnerPayload.tests.join('\n- '));
-      }
-      LOGGER.line(orchestrator, 'summary', 'Key points:\n- ' + (winnerPayload.key_points || []).join('\n- '));
-      LOGGER.line(orchestrator, 'confidence', 'Confidence: ' + (winnerPayload.confidence || 'low'));
-      LOGGER.line(orchestrator, 'final-answer', '========================');
-      // Build scorecards summary
-      const scorecards = agents.map(a => {
-        const nov = okCrits.find(x => x.agentId === a.id)?.res.json?.critiques?.length || 0;
-        const blk = okCrits.find(x => x.agentId === a.id)?.res.json?.critiques?.reduce((count, c) =>
-          count + (c.points?.filter(p => p.severity === 'blocker').length || 0), 0) || 0;
-        const isRubber = !okCrits.find(x => x.agentId === a.id) && okVotes.find(x => x.agentId === a.id);
-        return {
-          agentId: a.id,
-          displayName: a.displayName,
-          avatar: a.avatar,
-          novelCritiques: nov,
-          blockers: blk,
-          rubber: isRubber,
-          avgPeerScore: undefined, // could be filled via raterScores
-        };
-      });
-      LOGGER.summary(scorecards);
-      LOGGER.end();
+      // Complete orchestration with consensus result
+      const finalResult = buildFinalResult(winner, winnerPayload);
+      completeOrchestration(orchestrator, finalResult, 'final-result', agents, okCrits, okVotes, raterScores, avg);
       return;
     }
   }
@@ -1167,31 +1310,7 @@ async function runOrchestration(userQuestion, agents) {
   const winnerPayload = current.find(c => c.agentId === top.agentId)?.payload;
   const orchestrator = { id: 'orchestrator', avatar: '🗂️', displayName: 'Orchestrator', color: 'white' };
 
-  LOGGER.line(orchestrator, 'no-consensus', '⚖️  No consensus. Selecting highest scoring proposal.');
-  LOGGER.line(orchestrator, 'final-answer', '===== FINAL (NO CONSENSUS) =====');
-  LOGGER.line(orchestrator, 'proposal', winnerPayload.proposal || '(no proposal)');
-
-  if (winnerPayload.code_patch) {
-    LOGGER.line(orchestrator, 'code-patch', '--- code_patch (unified diff) ---');
-    LOGGER.line(orchestrator, 'code-patch', winnerPayload.code_patch);
-  }
-  if (winnerPayload.tests && winnerPayload.tests.length) {
-    LOGGER.line(orchestrator, 'tests', 'Tests to run:\n- ' + winnerPayload.tests.join('\n- '));
-  }
-  LOGGER.line(orchestrator, 'rankings', 'Rankings: ' + finalAvg.map(x => `${x.agentId}:${x.avg.toFixed(2)}`).join('  '));
-  // Collect dissent notes from blockers map if available
-  // (Simplified: could list issues but not computed here)
-  LOGGER.line(orchestrator, 'final-answer', '===============================');
-  // Build scorecards summary for fallback case (counts zero for critiques)
-  const scorecards = agents.map(a => ({
-    agentId: a.id,
-    displayName: a.displayName,
-    avatar: a.avatar,
-    novelCritiques: 0,
-    blockers: 0,
-    rubber: false,
-    avgPeerScore: undefined,
-  }));
-  LOGGER.summary(scorecards);
-  LOGGER.end();
+  // Complete orchestration with no-consensus result
+  const noConsensusResult = buildNoConsensusResult(winnerPayload, finalAvg);
+  completeOrchestration(orchestrator, noConsensusResult, 'no-consensus-result', agents, [], okFinalVotes, new Map(), finalAvg);
 }
