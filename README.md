@@ -40,6 +40,37 @@ node index.js "Your question here" --preset=team --consensus=super --maxRounds=5
 - `/question` or `-q` - Ask a question (or just type directly)
 - `/exit` - Exit the CLI
 
+## Project Context Awareness
+
+**🎯 Key Feature: Agents can access your project files when debating solutions!**
+
+When you run Excalibur from within a project directory, the AI agents can:
+- **Read your codebase** - Access source files, configs, and documentation
+- **Understand your stack** - Analyze package.json, requirements.txt, etc.
+- **Review your patterns** - Learn from existing code style and architecture
+- **Provide contextual solutions** - Suggest implementations that fit your project
+
+### Examples of Project-Aware Debates:
+
+```bash
+# In a Node.js project directory
+excalibur "How should I implement authentication for this API?" --preset=team
+
+# In a Python project directory
+excalibur "Optimize this database query performance" --preset=team
+
+# In a React project directory
+excalibur "Add error boundary handling to this component" --preset=team
+```
+
+The agents will analyze your existing code and debate solutions that:
+- ✅ Match your existing patterns and conventions
+- ✅ Use libraries you already have installed
+- ✅ Follow your project's architecture
+- ✅ Consider your specific requirements and constraints
+
+**💡 Pro Tip:** The more context your agents have about your project, the better their solutions will be!
+
 ## Installation From Source
 
 ```bash
