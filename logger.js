@@ -26,19 +26,65 @@ export const ANSI = {
 };
 
 /**
+ * Helper to highlight conversation patterns with agent-aligned colors
+ * @param {string} text - Text to highlight
+ * @param {Array} agents - Array of agent objects
+ * @param {boolean} noColor - Whether to disable colors
+ * @returns {string} Highlighted text
+ */
+function highlightConversation(text, agents, noColor = false) {
+  if (noColor) return text;
+
+  // Highlight @mentions and align "You are absolutely right" with target agent's color
+  if (agents) {
+    for (const agent of agents) {
+      const displayName = agent.displayName || agent.id;
+      const agentColor = agent.color || 'white';
+
+      // Highlight @mentions using the mentioned agent's color
+      const mentionPattern = new RegExp(`(@${displayName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'g');
+      text = text.replace(mentionPattern, ANSI.paint('$1', agentColor, noColor));
+
+      // Highlight "You are absolutely right" or "you are absolutely right" when addressing this agent
+      const rightPattern = new RegExp(`(@${displayName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[^.]*?)([Yy]ou are absolutely right)`, 'g');
+      text = text.replace(rightPattern, (_, prefix, phrase) =>
+        prefix + ANSI.boldify(ANSI.paint(phrase, agentColor, noColor), noColor)
+      );
+
+      // Highlight "However, I disagree with" or "however, I disagree with" when addressing this agent
+      const disagreePattern = new RegExp(`(@${displayName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[^.]*?)([Hh]owever, I disagree with)`, 'g');
+      text = text.replace(disagreePattern, (_, prefix, phrase) =>
+        prefix + ANSI.boldify(ANSI.paint(phrase, agentColor, noColor), noColor)
+      );
+    }
+  }
+
+  return text;
+}
+
+/**
  * ConversationLogger is responsible for logging per‑agent messages to individual files
  * as well as producing a consolidated transcript at the end of a session.  It also
  * supports coloured console output for readability.
  */
 export class ConversationLogger {
   constructor(baseDir, session, options = {}) {
-    const { noColor = false, quiet = false } = options;
+    const { noColor = false, quiet = false, agents = [] } = options;
     this.baseDir = path.join(baseDir, session);
     fs.mkdirSync(this.baseDir, { recursive: true });
     this.streams = new Map();
     this.meta = { session, startedAt: new Date().toISOString(), events: [] };
     this.noColor = noColor;
     this.quiet = quiet;
+    this.agents = agents;
+  }
+
+  /**
+   * Set or update the agents array for conversation highlighting
+   * @param {Array} agents - Array of agent objects
+   */
+  setAgents(agents) {
+    this.agents = agents;
   }
   // Returns a writable stream for the given agent ID, creating it if needed
   agentFile(agentId) {
@@ -61,6 +107,14 @@ export class ConversationLogger {
   line(agent, phase, text, fileOnly = false) {
     const ts = new Date().toISOString();
     const stream = this.agentFile(agent.id);
+
+    // Apply conversation highlighting for conversational phases
+    const conversationalPhases = ['critique', 'revision', 'vote'];
+    let displayText = text;
+    if (conversationalPhases.includes(phase) && this.agents && this.agents.length > 0) {
+      displayText = highlightConversation(text, this.agents, this.noColor);
+    }
+
     stream.write(`[${ts}] [${phase}] ${text}\n`);
 
     if (!this.quiet && !fileOnly) {
@@ -68,7 +122,7 @@ export class ConversationLogger {
       const phaseLabel = ANSI.boldify(ANSI.paint(`[${phase}]`, agent.color || 'white', this.noColor), this.noColor);
       const tagColour = ANSI.paint(tag, agent.color || 'white', this.noColor);
       // Move phase before agent name for better readability
-      process.stdout.write(`${ANSI.paint('│', 'gray', this.noColor)} ${phaseLabel} ${tagColour} ${ANSI.paint('➤', 'cyan', this.noColor)} ${text}\n\n`);
+      process.stdout.write(`${ANSI.paint('│', 'gray', this.noColor)} ${phaseLabel} ${tagColour} ${ANSI.paint('➤', 'cyan', this.noColor)} ${displayText}\n\n`);
     }
 
     this.meta.events.push({ t: ts, agentId: agent.id, phase, text });

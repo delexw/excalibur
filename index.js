@@ -66,7 +66,7 @@ function logAgentResponse(agent, json, phase) {
         for (const c of critiques) {
           const conversationMsg = c.conversation_message;
           if (conversationMsg) {
-            LOGGER.line(agent, 'critique', highlightConversation(conversationMsg, getAgentsForHighlighting()));
+            LOGGER.line(agent, 'critique', conversationMsg);
           }
         }
       } else {
@@ -80,7 +80,7 @@ function logAgentResponse(agent, json, phase) {
       for (const response of responses) {
         const conversationMsg = response.conversation_message;
         if (conversationMsg) {
-          LOGGER.line(agent, 'revision', highlightConversation(conversationMsg, getAgentsForHighlighting()));
+          LOGGER.line(agent, 'revision', conversationMsg);
         }
       }
       break;
@@ -88,7 +88,7 @@ function logAgentResponse(agent, json, phase) {
     case 'vote':
       const conversationMsg = json.conversation_message;
       if (conversationMsg) {
-        LOGGER.line(agent, 'vote', highlightConversation(conversationMsg, getAgentsForHighlighting()));
+        LOGGER.line(agent, 'vote', conversationMsg);
       } else {
         LOGGER.line(agent, 'error', 'Missing conversation_message for vote response');
       }
@@ -102,11 +102,6 @@ function logAgentResponse(agent, json, phase) {
   }
 }
 
-// Helper to get agents for conversation highlighting (will be set by round functions)
-let currentAgents = [];
-function getAgentsForHighlighting() {
-  return currentAgents;
-}
 
 // Helper function to check for interruption and return consistent error result
 function checkInterruption(agent, format = 'spawn') {
@@ -225,38 +220,6 @@ const PROMPTS = {
 // Colour wrapper helpers using imported ANSI and the noColor flag
 const paint = (txt, colour) => ANSI.paint(txt, colour, LOG.noColor);
 
-// Helper to highlight conversation patterns with agent-aligned colors
-function highlightConversation(text, agents, noColor = LOG.noColor) {
-  if (noColor) return text;
-
-  // Highlight @mentions and align "You are absolutely right" with target agent's color
-  if (agents) {
-    for (const agent of agents) {
-      const displayName = agent.displayName || agent.id;
-      const agentColor = agent.color || 'white';
-
-      // Highlight @mentions using the mentioned agent's color
-      const mentionPattern = new RegExp(`(@${displayName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'g');
-      text = text.replace(mentionPattern, ANSI.paint('$1', agentColor, noColor));
-
-      // Highlight "You are absolutely right" or "you are absolutely right" when addressing this agent
-      const rightPattern = new RegExp(`(@${displayName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[^.]*?)([Yy]ou are absolutely right)`, 'g');
-      text = text.replace(rightPattern, (match, prefix, phrase) =>
-        prefix + ANSI.boldify(ANSI.paint(phrase, agentColor, noColor), noColor)
-      );
-
-      // Highlight "However, I disagree with" or "however, I disagree with" when addressing this agent
-      const disagreePattern = new RegExp(`(@${displayName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[^.]*?)([Hh]owever, I disagree with)`, 'g');
-      text = text.replace(disagreePattern, (match, prefix, phrase) =>
-        prefix + ANSI.boldify(ANSI.paint(phrase, agentColor, noColor), noColor)
-      );
-    }
-  }
-
-
-
-  return text;
-}
 
 // Global conversation logger instantiation with colour and quiet options
 const LOGGER = new ConversationLogger(LOG.dir, LOG.session, { noColor: LOG.noColor, quiet: LOG.quiet });
@@ -1151,6 +1114,9 @@ async function runOrchestration(userQuestion, agents) {
   // Reset interruption flag at the start
   global.orchestrationInterrupted = false;
 
+  // Set agents in logger for conversation highlighting
+  LOGGER.setAgents(agents);
+
   // Display session configuration
   LOGGER.blockTitle(`Session ${LOGGER.session} — ${agents.length} agents`);
 
@@ -1254,6 +1220,8 @@ async function runOrchestration(userQuestion, agents) {
 
       if (OWNER.ids.length) {
         const candId = winner.agentId;
+        const candAgent = agents.find(a => a.id === candId);
+        const candDisplayName = candAgent ? (candAgent.displayName || candAgent.id) : candId;
         const raters = raterScores.get(candId) || new Map();
 
         // Log each owner's decision
@@ -1264,10 +1232,10 @@ async function runOrchestration(userQuestion, agents) {
 
           if (ownerAgent) {
             if (approves) {
-              LOGGER.line(ownerAgent, 'owner-approve', `I approve ${candId}'s proposal for consensus. During voting, I rated it ${ownerScore.toFixed(2)}/1.0, which meets the owner threshold of ${OWNER.minScore}.`);
+              LOGGER.line(ownerAgent, 'owner-approve', `I approve @${candDisplayName}'s proposal for consensus. During voting, I rated it ${ownerScore.toFixed(2)}/1.0, which meets the owner threshold of ${OWNER.minScore}.`);
             } else {
               const scoreText = ownerScore === -Infinity ? 'did not vote' : `rated it ${ownerScore.toFixed(2)}/1.0`;
-              LOGGER.line(ownerAgent, 'owner-reject', `I reject ${candId}'s proposal for consensus. During voting, I ${scoreText}, which is below the required owner threshold of ${OWNER.minScore}.`);
+              LOGGER.line(ownerAgent, 'owner-reject', `I reject @${candDisplayName}'s proposal for consensus. During voting, I ${scoreText}, which is below the required owner threshold of ${OWNER.minScore}.`);
             }
           }
         }
