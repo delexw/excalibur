@@ -33,7 +33,7 @@ Return a single **strict JSON** object containing only critiques of other agents
         }
         /* additional critique points for the same agent */
       ],
-      "conversation_message": "<natural human-like message addressing the target agent that incorporates ALL the critique points above. Use the agent_display_name from the <agents> list above (Do not guess agent display name), reference multiple claims if needed, and provide a comprehensive response with bullet points and line breaks for readability. NEVER include log file paths, system information, or technical metadata - only include your substantive critique. Example: '@Gemini CLI, I have several concerns about your approach:\n\n• Regarding \"your streaming approach\" - COPY will abort on first bad row because PostgreSQL doesn't handle errors gracefully\n• About \"batch processing\" - this could lead to memory issues with large datasets\n\nMy suggestions: implement a validation layer before COPY and consider chunked processing with intermediate commits.'>"
+      "conversation_message": "<natural human-like message addressing the target agent that incorporates ALL the critique points above. Reference multiple claims if needed, and provide a comprehensive response with bullet points and line breaks for readability. Example: '@Agent Display Name, I have several concerns about your approach:\n\n• Regarding \"your streaming approach\" - COPY will abort on first bad row because PostgreSQL doesn't handle errors gracefully\n• About \"batch processing\" - this could lead to memory issues with large datasets\n\nMy suggestions: implement a validation layer before COPY and consider chunked processing with intermediate commits.'>"
     }
     /* additional critique objects for other agents */
   ]
@@ -43,7 +43,7 @@ Return a single **strict JSON** object containing only critiques of other agents
 ## Guidelines
 
 - **Only critique other agents**: Never include your own agent ID in the `target_agent` field. Only critique proposals from other agents.
-- **Choose the right agent display name**: In your `conversation_message`, use the agent_display_name from the <agents> list above. Never guess agent display name. Never read the name from current working directory or guess a name
+- **Choose the right agent display name**: In your `conversation_message`, use the agent_display_name from the <agents> list above. Never guess agent display name. Never read the name from current working directory or guess a name. **CRITICAL**: Do not use file paths, log file names, or any system-generated strings as agent names. Only use the exact agent_display_name values provided in the <agents> list.
 - **Novelty required**: aim for at least one *novel* major or blocker critique unless none truly exist.  If no major issues are found, clearly explain why.
 - **Be specific and concise**: keep quotes under 25 words and focus on the most important issues.
 - **Chain‑of‑thought** is prohibited: summarise your reasoning succinctly but do not reveal hidden reasoning.

@@ -14,7 +14,7 @@
     "id": "gemini-pro",
     "displayName": "Gemini CLI Pro",
     "cmd": "gemini",
-    "args": ["-p", "{PROMPT}", "-m", "gemini-2.5-pro"],
+    "args": ["-p", "{PROMPT}", "-m", "gemini-2.5-flash"],
     "inputMode": "arg",
     "supportsSystemPrefix": true,
     "timeoutMs": 300000,
