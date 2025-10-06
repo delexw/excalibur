@@ -409,7 +409,7 @@ export class BlessedInteractive {
 {bold}{cyan-fg}███████╗██╔╝ ██╗╚██████╗██║  ██║███████╗██║██████╔╝╚██████╔╝██║  ██║{/cyan-fg}{/bold}
 {bold}{cyan-fg}╚══════╝╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝╚══════╝╚═╝╚═════╝  ╚═════╝ ╚═╝  ╚═╝{/cyan-fg}{/bold}
 
-{yellow-fg}⚔️  EXCALIBUR CLI - Multi-Agent Orchestration Engine{/yellow-fg}`;
+{yellow-fg}⚔️  EXCALIBUR CLI - Multi-Agent Debate Engine{/yellow-fg}`;
   }
 
   /**
@@ -1138,6 +1138,8 @@ export class BlessedInteractive {
       // Display final answer in the fresh output box
       if (result.success && result.finalAnswer) {
         this.outputBox.log('');
+        this.outputBox.log('{cyan-fg}' + '═'.repeat(60) + '{/cyan-fg}');
+        this.outputBox.log('{bold}{green-fg}===== FINAL ANSWER ====={/green-fg}{/bold}');
         this.outputBox.log('{cyan-fg}' + '═'.repeat(60) + '{/cyan-fg}');
         this.outputBox.log('');
         // Display final answer (blessed tags already in the text)

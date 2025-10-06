@@ -34,7 +34,7 @@ function logAgentResponse(agent, json, phase) {
   switch (phase) {
     case 'proposal':
     case 'propose':
-      const proposal = json.proposal || json.answer || 'No proposal provided';
+      const proposal = json.proposal || 'No proposal provided';
       const confidence = json.confidence ? ` I'm ${json.confidence} confident about this.` : '';
       LOGGER.line(agent, 'proposal', `My proposal: ${proposal}${confidence}`);
       break;
@@ -195,6 +195,39 @@ function logOwnerApproval(approvalResult) {
       LOGGER.line({ id: 'orchestrator' }, 'owner', `✓ ${ownerId}: ${score.toFixed(2)}`);
     }
   }
+}
+
+// Helper function to format final answer with all sections
+function formatFinalAnswer(payload) {
+  if (!payload) {
+    return 'No consensus reached';
+  }
+
+  const sections = [];
+  sections.push(payload.proposal || '(no proposal)');
+
+  if (payload.code_patch) {
+    sections.push('');
+    sections.push('--- code_patch (unified diff) ---');
+    sections.push(payload.code_patch);
+  }
+
+  if (payload.tests && payload.tests.length) {
+    sections.push('');
+    sections.push('Tests to run:');
+    payload.tests.forEach(test => sections.push(`- ${test}`));
+  }
+
+  if (payload.key_points && payload.key_points.length) {
+    sections.push('');
+    sections.push('Key points:');
+    payload.key_points.forEach(point => sections.push(`- ${point}`));
+  }
+
+  sections.push('');
+  sections.push(`Confidence: ${payload.confidence || 'low'}`);
+
+  return sections.join('\n');
 }
 
 // Extract the JSON body from agent output using format-specific approach
@@ -583,7 +616,16 @@ export async function runOrchestration(userQuestion, agents, paint) {
       if (rev.res && rev.res.ok) {
         const idx = current.findIndex(p => p.agentId === rev.agentId);
         if (idx >= 0) {
-          current[idx].payload = rev.res.json;
+          const originalPayload = current[idx].payload;
+          const revisionPayload = rev.res.json;
+
+          // If revised.proposal is "no change", preserve the original proposal
+          if (revisionPayload.revised?.proposal === 'no change') {
+            // Copy the original proposal into the revised structure
+            revisionPayload.revised.proposal = originalPayload.proposal || originalPayload.revised?.proposal || 'No proposal';
+          }
+
+          current[idx].payload = revisionPayload;
         }
       }
     }
@@ -633,11 +675,21 @@ export async function runOrchestration(userQuestion, agents, paint) {
 
       LOGGER.blockTitle(`✅ Consensus reached! Winner: ${winnerId}`);
 
-      const finalAnswer = winner.payload.proposal || winner.payload.answer || 'No proposal text';
-
-      // Log the final answer
+      // Debug: log winner structure
       const orchestrator = { id: 'orchestrator', displayName: 'Orchestrator', avatar: '⚔️' };
+      LOGGER.line(orchestrator, 'debug', `Winner payload keys: ${Object.keys(winner.payload || {}).join(', ')}`, true);
+      LOGGER.line(orchestrator, 'debug', `Winner payload: ${JSON.stringify(winner.payload).substring(0, 200)}`, true);
+
+      // Extract the winning payload (either direct or revised)
+      const winningPayload = winner.payload.revised || winner.payload;
+
+      // Format final answer using helper function
+      const finalAnswer = formatFinalAnswer(winningPayload);
+
+      // Format and log the final result
+      LOGGER.blockTitle('===== FINAL ANSWER =====');
       LOGGER.line(orchestrator, 'result', finalAnswer);
+      LOGGER.blockTitle('========================');
 
       return finalAnswer;
     }
@@ -659,5 +711,17 @@ export async function runOrchestration(userQuestion, agents, paint) {
 
   const winner = current.find(p => p.agentId === winnerId);
 
-  return winner?.payload.proposal || winner?.payload.answer || 'No consensus reached';
+  // Extract the winning payload (either direct or revised)
+  const winningPayload = winner?.payload.revised || winner?.payload;
+
+  // Format final answer using helper function
+  const finalAnswer = formatFinalAnswer(winningPayload);
+
+  // Format and log the result
+  const orchestrator = { id: 'orchestrator', displayName: 'Orchestrator', avatar: '⚔️' };
+  LOGGER.blockTitle('===== BEST CANDIDATE =====');
+  LOGGER.line(orchestrator, 'result', `Best proposal from ${winnerId}:\n${finalAnswer}`);
+  LOGGER.blockTitle('==========================');
+
+  return finalAnswer;
 }
