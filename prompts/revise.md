@@ -36,7 +36,7 @@ Return a single **strict JSON** object with your revised proposal:
       "feedback_accepted": "<brief description of valid feedback you incorporated>",
       "feedback_rejected": "<brief description of feedback you rejected and why>",
       "action_taken": "<'revised' if you changed your proposal, 'rejected' if you disagreed with their feedback>",
-      "conversation_message": "<natural human-like response to the critic that reflects the action_taken and incorporates feedback_accepted/feedback_rejected details. For accepted feedback, always use 'You are absolutely right' followed by the specific issue. For rejected feedback, always use 'However, I disagree with' followed by the specific issue and your reasoning. Example: '🙌 Agent Display Name, you are absolutely right about the error handling issue - COPY does fail completely on bad data. I have updated my proposal to include validation. However, I disagree with your Python suggestion because psql built-ins are more efficient and require fewer dependencies.'>"
+      "conversation_message": "<natural human-like response to the critic that reflects the action_taken and incorporates feedback_accepted/feedback_rejected details. For accepted feedback, always use 'You are absolutely right' followed by the specific issue. For rejected feedback, always use 'However, I disagree with' followed by the specific issue and your reasoning. Example: '>Agent Display Name, you are absolutely right about the error handling issue - COPY does fail completely on bad data. I have updated my proposal to include validation. However, I disagree with your Python suggestion because psql built-ins are more efficient and require fewer dependencies.'>"
     }
   ]
 }

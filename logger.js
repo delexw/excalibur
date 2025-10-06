@@ -41,18 +41,18 @@ function highlightConversation(text, agents, noColor = false) {
       const displayName = agent.displayName || agent.id;
       const agentColor = agent.color || 'white';
 
-      // Highlight 🙌mentions using the mentioned agent's color
-      const mentionPattern = new RegExp(`(🙌 ${displayName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'g');
+      // Highlight >mentions using the mentioned agent's color
+      const mentionPattern = new RegExp(`(>${displayName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'g');
       text = text.replace(mentionPattern, ANSI.paint('$1', agentColor, noColor));
 
       // Highlight "You are absolutely right" or "you are absolutely right" when addressing this agent
-      const rightPattern = new RegExp(`(🙌 ${displayName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[^.]*?)([Yy]ou are absolutely right)`, 'g');
+      const rightPattern = new RegExp(`(>${displayName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[^.]*?)([Yy]ou are absolutely right)`, 'g');
       text = text.replace(rightPattern, (_, prefix, phrase) =>
         prefix + ANSI.boldify(ANSI.paint(phrase, agentColor, noColor), noColor)
       );
 
       // Highlight "However, I disagree with" or "however, I disagree with" when addressing this agent
-      const disagreePattern = new RegExp(`(🙌 ${displayName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[^.]*?)([Hh]owever, I disagree with)`, 'g');
+      const disagreePattern = new RegExp(`(>${displayName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[^.]*?)([Hh]owever, I disagree with)`, 'g');
       text = text.replace(disagreePattern, (_, prefix, phrase) =>
         prefix + ANSI.boldify(ANSI.paint(phrase, agentColor, noColor), noColor)
       );
@@ -69,7 +69,7 @@ function highlightConversation(text, agents, noColor = false) {
  */
 export class ConversationLogger {
   constructor(baseDir, session, options = {}) {
-    const { noColor = false, quiet = false, agents = [] } = options;
+    const { noColor = false, quiet = false, agents = [], blessedUI = null } = options;
     this.baseDir = path.join(baseDir, session);
     fs.mkdirSync(this.baseDir, { recursive: true });
     this.streams = new Map();
@@ -77,6 +77,7 @@ export class ConversationLogger {
     this.noColor = noColor;
     this.quiet = quiet;
     this.agents = agents;
+    this.blessedUI = blessedUI;
   }
 
   /**
@@ -85,6 +86,14 @@ export class ConversationLogger {
    */
   setAgents(agents) {
     this.agents = agents;
+  }
+
+  /**
+   * Set the blessed UI instance for output routing
+   * @param {Object} blessedUI - BlessedUI instance
+   */
+  setBlessedUI(blessedUI) {
+    this.blessedUI = blessedUI;
   }
   // Returns a writable stream for the given agent ID, creating it if needed
   agentFile(agentId) {
@@ -109,7 +118,7 @@ export class ConversationLogger {
     const stream = this.agentFile(agent.id);
 
     // Apply conversation highlighting for conversational phases
-    const conversationalPhases = ['critique', 'revision', 'vote'];
+    const conversationalPhases = ['proposal', 'critique', 'revision', 'vote'];
     let displayText = text;
     if (conversationalPhases.includes(phase) && this.agents && this.agents.length > 0) {
       displayText = highlightConversation(text, this.agents, this.noColor);
@@ -119,10 +128,26 @@ export class ConversationLogger {
 
     if (!this.quiet && !fileOnly) {
       const tag = `${agent.avatar || '🤖'} ${agent.displayName || agent.id}`;
-      const phaseLabel = ANSI.boldify(ANSI.paint(`[${phase}]`, agent.color || 'white', this.noColor), this.noColor);
-      const tagColour = ANSI.paint(tag, agent.color || 'white', this.noColor);
-      // Move phase before agent name for better readability
-      process.stdout.write(`${ANSI.paint('│', 'gray', this.noColor)} ${phaseLabel} ${tagColour} ${ANSI.paint('➤', 'cyan', this.noColor)} ${displayText}\n\n`);
+      const phaseLabel = `[${phase}]`;
+      const tagText = `${tag}`;
+
+      // If blessed UI is active, send to blessed UI instead of stdout
+      if (this.blessedUI) {
+        // Format for blessed UI - no need for agent name since each agent has its own panel
+        const blessedOutput = phase ? `[${phase}] ${text}` : text;
+
+        // Orchestrator logs go to orchestration panel (if available), others to agent panels
+        if (agent.id === 'orchestrator' && this.blessedUI.setHeaderMessage) {
+          this.blessedUI.setHeaderMessage(blessedOutput);
+        } else {
+          this.blessedUI.appendToAgent(agent.id, blessedOutput);
+        }
+      } else {
+        // Normal console output with colors
+        const phaseLabel = ANSI.boldify(ANSI.paint(`[${phase}]`, agent.color || 'white', this.noColor), this.noColor);
+        const tagColour = ANSI.paint(tag, agent.color || 'white', this.noColor);
+        process.stdout.write(`${ANSI.paint('│', 'gray', this.noColor)} ${phaseLabel} ${tagColour} ${ANSI.paint('➤', 'cyan', this.noColor)} ${displayText}\n\n`);
+      }
     }
 
     this.meta.events.push({ t: ts, agentId: agent.id, phase, text });
@@ -134,10 +159,17 @@ export class ConversationLogger {
    */
   blockTitle(title) {
     if (this.quiet) return;
-    const width = Math.max(8, Math.min(80, process.stdout.columns || 80) - 4);
-    const line = '─'.repeat(width);
-    // Add more spacing and visual emphasis for better stage separation
-    console.log(ANSI.paint(`\n\n┌${line}┐\n│ ${ANSI.boldify(title, this.noColor)} │\n└${line}┘\n`, 'cyan', this.noColor));
+
+    if (this.blessedUI) {
+      // Send to orchestration log in blessed UI
+      this.blessedUI.setHeaderMessage(`\n━━━ ${title} ━━━\n`);
+    } else {
+      // Normal console output
+      const width = Math.max(8, Math.min(80, process.stdout.columns || 80) - 4);
+      const line = '─'.repeat(width);
+      // Add more spacing and visual emphasis for better stage separation
+      console.log(ANSI.paint(`\n\n┌${line}┐\n│ ${ANSI.boldify(title, this.noColor)} │\n└${line}┘\n`, 'cyan', this.noColor));
+    }
   }
   /**
    * Generate a human‑readable transcript and a JSON meta file.  The report
