@@ -100,6 +100,103 @@ function checkInterruption(agent, returnBoolean = false) {
   return null;
 }
 
+/**
+ * Calculate vote tallies from votes
+ * @param {Array} currentProposals - Current proposals
+ * @param {Array} votes - Vote responses
+ * @returns {Map} Tallies map with scores and voters
+ */
+function calculateVoteTallies(currentProposals, votes) {
+  const tallies = new Map();
+
+  // Initialize tallies for each proposal
+  for (const agentId of currentProposals.map(p => p.agentId)) {
+    tallies.set(agentId, { score: 0, voters: [] });
+  }
+
+  // Accumulate scores from each vote
+  for (const vote of votes) {
+    const scores = vote.res.json.scores || [];
+    for (const scoreEntry of scores) {
+      const targetId = scoreEntry.agent_id;
+      const score = scoreEntry.score;
+      if (tallies.has(targetId) && typeof score === 'number') {
+        const tally = tallies.get(targetId);
+        tally.score += score;
+        tally.voters.push(vote.agentId);
+      }
+    }
+  }
+
+  return tallies;
+}
+
+/**
+ * Check if owner approval requirements are met
+ * @param {string} winnerId - ID of winning proposal
+ * @param {Array} votes - Vote responses
+ * @returns {Object} { approved: boolean, ownerScores: Map }
+ */
+function checkOwnerApproval(winnerId, votes) {
+  if (OWNER.ids.length === 0) {
+    return { approved: true, ownerScores: new Map() };
+  }
+
+  // Build owner scores map
+  const ownerScores = new Map();
+  for (const vote of votes) {
+    const voterId = vote.agentId;
+    if (OWNER.ids.includes(voterId)) {
+      const scores = vote.res.json.scores || [];
+      const ownerVote = scores.find(s => s.agent_id === winnerId);
+      if (ownerVote) {
+        ownerScores.set(voterId, ownerVote.score);
+      }
+    }
+  }
+
+  // Check if requirements are met
+  const ownersAboveMin = Array.from(ownerScores.entries())
+    .filter(([_, score]) => score >= OWNER.minScore)
+    .map(([id, _]) => id);
+
+  let approved = false;
+  if (OWNER.mode === 'all') {
+    approved = OWNER.ids.every(ownerId => ownersAboveMin.includes(ownerId));
+  } else {
+    approved = ownersAboveMin.length > 0;
+  }
+
+  return { approved, ownerScores, ownersAboveMin };
+}
+
+/**
+ * Log owner approval status
+ * @param {Object} approvalResult - Result from checkOwnerApproval
+ */
+function logOwnerApproval(approvalResult) {
+  const { approved, ownerScores, ownersAboveMin } = approvalResult;
+
+  if (!approved) {
+    LOGGER.blockTitle(`⚠️  Owner approval required but not met (mode=${OWNER.mode}, minScore=${OWNER.minScore})`);
+    for (const ownerId of OWNER.ids) {
+      const score = ownerScores.get(ownerId);
+      if (score !== undefined) {
+        const status = score >= OWNER.minScore ? '✓' : '✗';
+        LOGGER.line({ id: 'orchestrator' }, 'owner', `${status} ${ownerId}: ${score.toFixed(2)}`);
+      } else {
+        LOGGER.line({ id: 'orchestrator' }, 'owner', `✗ ${ownerId}: no vote`);
+      }
+    }
+  } else if (OWNER.ids.length > 0) {
+    LOGGER.blockTitle(`✓ Owner approval granted`);
+    for (const ownerId of ownersAboveMin) {
+      const score = ownerScores.get(ownerId);
+      LOGGER.line({ id: 'orchestrator' }, 'owner', `✓ ${ownerId}: ${score.toFixed(2)}`);
+    }
+  }
+}
+
 // Extract the JSON body from agent output using format-specific approach
 function normalizeJsonText(txt) {
   // Handle Codex FIRST - extract content between "codex" line and "tokens used" line
@@ -215,6 +312,11 @@ async function spawnAgentOncePTY(agent, prompt, timeoutSec, phase = 'response') 
       return interruption;
     }
 
+    // Set agent status to running
+    if (LOGGER.blessedUI && LOGGER.blessedUI.setAgentStatus) {
+      LOGGER.blessedUI.setAgentStatus(agent.id, 'running');
+    }
+
     // Use shared spawn utility (DRY principle)
     const timeout = Math.max(agent.timeoutMs || timeoutSec * 1000, timeoutSec * 1000);
     const result = await spawnAgentProcess(agent, prompt, {
@@ -244,15 +346,29 @@ async function spawnAgentOncePTY(agent, prompt, timeoutSec, phase = 'response') 
       // Log the response immediately
       logAgentResponse(agent, json, phase);
 
+      // Set agent status to completed
+      if (LOGGER.blessedUI && LOGGER.blessedUI.setAgentStatus) {
+        LOGGER.blessedUI.setAgentStatus(agent.id, 'completed');
+      }
+
       return { ok: true, json, raw: stdout };
     } catch (parseErr) {
       // Log the failed normalized text to help debug
       const normalizedJsonText = normalizeJsonText(stdout);
       LOGGER.line(agent, 'parse:error', `Parse failed. Normalized text: ${normalizedJsonText.substring(0, 200)}...`, true);
 
+      // Set agent status to failed
+      if (LOGGER.blessedUI && LOGGER.blessedUI.setAgentStatus) {
+        LOGGER.blessedUI.setAgentStatus(agent.id, 'failed');
+      }
+
       return { ok: false, error: `Non‑JSON or parse error from ${agent.id}: ${parseErr.message}`, raw: stdout };
     }
   } catch (error) {
+    // Set agent status to failed on any error
+    if (LOGGER.blessedUI && LOGGER.blessedUI.setAgentStatus) {
+      LOGGER.blessedUI.setAgentStatus(agent.id, 'failed');
+    }
     return { ok: false, error: error.message };
   }
 }
@@ -488,21 +604,7 @@ export async function runOrchestration(userQuestion, agents, paint) {
     }
 
     // Calculate vote tallies
-    const tallies = new Map();
-    for (const agentId of current.map(p => p.agentId)) {
-      tallies.set(agentId, { score: 0, voters: [] });
-    }
-
-    for (const vote of okVotes) {
-      const voteData = vote.res.json.vote || {};
-      for (const [targetId, score] of Object.entries(voteData)) {
-        if (tallies.has(targetId)) {
-          const tally = tallies.get(targetId);
-          tally.score += score;
-          tally.voters.push(vote.agentId);
-        }
-      }
-    }
+    const tallies = calculateVoteTallies(current, okVotes);
 
     // Check consensus
     const threshold = consensusMode === 'unanimous' ? CONSENSUS.unanimousPct :
@@ -521,9 +623,23 @@ export async function runOrchestration(userQuestion, agents, paint) {
 
       const winner = current.find(p => p.agentId === winnerId);
 
+      // Check owner approval if required
+      const approvalResult = checkOwnerApproval(winnerId, okVotes);
+      logOwnerApproval(approvalResult);
+
+      if (!approvalResult.approved) {
+        continue; // Try next round
+      }
+
       LOGGER.blockTitle(`✅ Consensus reached! Winner: ${winnerId}`);
 
-      return winner.payload.proposal || winner.payload.answer || 'No proposal text';
+      const finalAnswer = winner.payload.proposal || winner.payload.answer || 'No proposal text';
+
+      // Log the final answer
+      const orchestrator = { id: 'orchestrator', displayName: 'Orchestrator', avatar: '⚔️' };
+      LOGGER.line(orchestrator, 'result', finalAnswer);
+
+      return finalAnswer;
     }
   }
 

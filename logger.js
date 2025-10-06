@@ -26,16 +26,57 @@ export const ANSI = {
 };
 
 /**
+ * Universal color formatter - works for both ANSI (console) and blessed (UI)
+ * @param {string} text - Text to format
+ * @param {string} color - Color name
+ * @param {Object} options - Formatting options
+ * @param {boolean} options.bold - Whether to make text bold
+ * @param {boolean} options.forBlessed - Use blessed tags (true) or ANSI codes (false)
+ * @param {boolean} options.noColor - Disable colors (for ANSI only)
+ * @returns {string} Formatted text
+ */
+function formatText(text, color = 'white', { bold = false, forBlessed = false, noColor = false } = {}) {
+  if (!text) return text;
+  if (noColor && !forBlessed) return text;
+
+  if (forBlessed) {
+    // Blessed tag format
+    const colorTag = `{${color}-fg}${text}{/${color}-fg}`;
+    return bold ? `{bold}${colorTag}{/bold}` : colorTag;
+  } else {
+    // ANSI code format
+    const colored = ANSI.paint(text, color, noColor);
+    return bold ? ANSI.boldify(colored, noColor) : colored;
+  }
+}
+
+/**
  * Helper to highlight conversation patterns with agent-aligned colors
+ * Works for both ANSI (console) and blessed (UI) output
  * @param {string} text - Text to highlight
  * @param {Array} agents - Array of agent objects
- * @param {boolean} noColor - Whether to disable colors
+ * @param {Object} options - Formatting options
+ * @param {boolean} options.forBlessed - Use blessed tags (true) or ANSI codes (false)
+ * @param {boolean} options.noColor - Disable colors (for ANSI only)
+ * @param {string} options.phase - Optional phase label to prepend
+ * @param {string} options.phaseColor - Color for phase label
  * @returns {string} Highlighted text
  */
-function highlightConversation(text, agents, noColor = false) {
-  if (noColor) return text;
+function highlightConversation(text, agents, { forBlessed = false, noColor = false, phase = null, phaseColor = 'white' } = {}) {
+  if (!text) return text;
 
-  // Highlight @mentions and align "You are absolutely right" with target agent's color
+  let result = text;
+
+  // Add phase label if provided
+  if (phase) {
+    const phaseLabel = formatText(`[${phase}]`, phaseColor, { bold: true, forBlessed, noColor });
+    result = `${phaseLabel} ${result}`;
+  }
+
+  // Skip highlighting if colors disabled and not using blessed
+  if (noColor && !forBlessed) return result;
+
+  // Highlight agent mentions and conversation patterns
   if (agents) {
     for (const agent of agents) {
       const displayName = agent.displayName || agent.id;
@@ -43,23 +84,25 @@ function highlightConversation(text, agents, noColor = false) {
 
       // Highlight >mentions using the mentioned agent's color
       const mentionPattern = new RegExp(`(>${displayName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'g');
-      text = text.replace(mentionPattern, ANSI.paint('$1', agentColor, noColor));
-
-      // Highlight "You are absolutely right" or "you are absolutely right" when addressing this agent
-      const rightPattern = new RegExp(`(>${displayName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[^.]*?)([Yy]ou are absolutely right)`, 'g');
-      text = text.replace(rightPattern, (_, prefix, phrase) =>
-        prefix + ANSI.boldify(ANSI.paint(phrase, agentColor, noColor), noColor)
+      result = result.replace(mentionPattern, (match) =>
+        formatText(match, agentColor, { forBlessed, noColor })
       );
 
-      // Highlight "However, I disagree with" or "however, I disagree with" when addressing this agent
+      // Highlight "You are absolutely right" when addressing this agent
+      const rightPattern = new RegExp(`(>${displayName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[^.]*?)([Yy]ou are absolutely right)`, 'g');
+      result = result.replace(rightPattern, (_, prefix, phrase) =>
+        prefix + formatText(phrase, agentColor, { bold: true, forBlessed, noColor })
+      );
+
+      // Highlight "However, I disagree with" when addressing this agent
       const disagreePattern = new RegExp(`(>${displayName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[^.]*?)([Hh]owever, I disagree with)`, 'g');
-      text = text.replace(disagreePattern, (_, prefix, phrase) =>
-        prefix + ANSI.boldify(ANSI.paint(phrase, agentColor, noColor), noColor)
+      result = result.replace(disagreePattern, (_, prefix, phrase) =>
+        prefix + formatText(phrase, agentColor, { bold: true, forBlessed, noColor })
       );
     }
   }
 
-  return text;
+  return result;
 }
 
 /**
@@ -117,24 +160,20 @@ export class ConversationLogger {
     const ts = new Date().toISOString();
     const stream = this.agentFile(agent.id);
 
-    // Apply conversation highlighting for conversational phases
-    const conversationalPhases = ['proposal', 'critique', 'revision', 'vote'];
-    let displayText = text;
-    if (conversationalPhases.includes(phase) && this.agents && this.agents.length > 0) {
-      displayText = highlightConversation(text, this.agents, this.noColor);
-    }
-
     stream.write(`[${ts}] [${phase}] ${text}\n`);
 
     if (!this.quiet && !fileOnly) {
       const tag = `${agent.avatar || '🤖'} ${agent.displayName || agent.id}`;
-      const phaseLabel = `[${phase}]`;
-      const tagText = `${tag}`;
+      const agentColor = agent.color || 'white';
 
       // If blessed UI is active, send to blessed UI instead of stdout
       if (this.blessedUI) {
-        // Format for blessed UI - no need for agent name since each agent has its own panel
-        const blessedOutput = phase ? `[${phase}] ${text}` : text;
+        // Use unified highlighting function with blessed tags
+        const blessedOutput = highlightConversation(text, this.agents, {
+          forBlessed: true,
+          phase,
+          phaseColor: agentColor
+        });
 
         // Orchestrator logs go to orchestration panel (if available), others to agent panels
         if (agent.id === 'orchestrator' && this.blessedUI.setHeaderMessage) {
@@ -143,10 +182,15 @@ export class ConversationLogger {
           this.blessedUI.appendToAgent(agent.id, blessedOutput);
         }
       } else {
-        // Normal console output with colors
-        const phaseLabel = ANSI.boldify(ANSI.paint(`[${phase}]`, agent.color || 'white', this.noColor), this.noColor);
-        const tagColour = ANSI.paint(tag, agent.color || 'white', this.noColor);
-        process.stdout.write(`${ANSI.paint('│', 'gray', this.noColor)} ${phaseLabel} ${tagColour} ${ANSI.paint('➤', 'cyan', this.noColor)} ${displayText}\n\n`);
+        // Use unified highlighting function with ANSI codes
+        const consoleOutput = highlightConversation(text, this.agents, {
+          forBlessed: false,
+          noColor: this.noColor,
+          phase,
+          phaseColor: agentColor
+        });
+        const tagColour = ANSI.paint(tag, agentColor, this.noColor);
+        process.stdout.write(`${ANSI.paint('│', 'gray', this.noColor)} ${tagColour} ${ANSI.paint('➤', 'cyan', this.noColor)} ${consoleOutput}\n\n`);
       }
     }
 

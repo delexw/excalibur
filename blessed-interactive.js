@@ -30,12 +30,16 @@ const COMMON_SCROLLABLE_CONFIG = {
   scrollable: true,
   keys: true,
   vi: true,
-  scrollbar: SCROLLBAR_CONFIG
+  focusable: true, // Make panels focusable for keyboard scrolling
+  scrollbar: SCROLLBAR_CONFIG,
+  wrap: true // Enable word wrapping for long text
 };
 
 const COMMON_LOG_CONFIG = {
   ...COMMON_SCROLLABLE_CONFIG,
-  alwaysScroll: true
+  alwaysScroll: false, // Don't force auto-scroll - let user control scrolling
+  mouse: true, // Enable mouse scrolling in panels
+  interactive: true // Allow user interaction with the log
 };
 
 // Widget factory methods (Factory Pattern)
@@ -94,6 +98,7 @@ export class BlessedInteractive {
     this.currentMode = this.UI_MODES.INTERACTIVE;
     this.selectedAgents = []; // For agent chat mode
     this.isSubmitting = false; // Guard against double submission
+    this.orchestrationActive = false; // Track if orchestration is actively running
   }
 
   /**
@@ -327,7 +332,8 @@ export class BlessedInteractive {
     // Get screen dimensions first
     const screenHeight = this.screen.height;
     const screenWidth = this.screen.width;
-    const orchestrationHeight = Math.floor(screenHeight * 0.3);
+    // Reduce orchestration log to 15% to give more space to agents
+    const orchestrationHeight = Math.max(5, Math.floor(screenHeight * 0.15));
 
     // Create fresh orchestration log panel
     this.orchestrationBox = WidgetFactory.createScrollableLog({
@@ -350,7 +356,8 @@ export class BlessedInteractive {
 
     // Calculate grid layout for agent panels
     const numAgents = agents.length;
-    const cols = Math.min(numAgents, 2); // Max 2 columns to avoid crowding
+    // Use single column for better readability if 3 or fewer agents
+    const cols = numAgents <= 3 ? 1 : 2;
     const rows = Math.ceil(numAgents / cols);
 
     // Reserve 3 lines at bottom for input box (1) + status bar (2)
@@ -464,9 +471,74 @@ export class BlessedInteractive {
   }
 
   /**
+   * Handle terminal resize events
+   */
+  handleResize() {
+    if (this.currentMode === this.UI_MODES.ORCHESTRATION) {
+      // In orchestration mode, adjust panel sizes
+      const agents = this.sessionManager.getAgents();
+      this.resizeOrchestrationLayout(agents);
+    } else if (this.currentMode === this.UI_MODES.AGENT_CHAT) {
+      // In agent chat mode, adjust selected agent panels
+      this.resizeOrchestrationLayout(this.selectedAgents);
+    }
+    // Interactive mode doesn't need special handling - blessed handles it
+    this.screen.render();
+  }
+
+  /**
+   * Resize orchestration layout panels to fit new terminal dimensions
+   */
+  resizeOrchestrationLayout(agents) {
+    if (!agents || agents.length === 0) return;
+
+    const screenHeight = this.screen.height;
+    const screenWidth = this.screen.width;
+    const orchestrationHeight = Math.max(5, Math.floor(screenHeight * 0.15));
+
+    // Resize orchestration box
+    if (this.orchestrationBox) {
+      this.orchestrationBox.height = orchestrationHeight;
+      this.orchestrationBox.width = '100%';
+    }
+
+    // Recalculate grid layout
+    const numAgents = agents.length;
+    const cols = numAgents <= 3 ? 1 : 2;
+    const rows = Math.ceil(numAgents / cols);
+
+    const reservedBottom = 3;
+    const agentAreaHeight = screenHeight - orchestrationHeight - reservedBottom;
+    const paneHeight = Math.floor(agentAreaHeight / rows);
+    const paneWidth = Math.floor(screenWidth / cols);
+
+    // Resize each agent panel
+    agents.forEach((agent, idx) => {
+      const pane = this.agentPanes.get(agent.id);
+      if (!pane) return;
+
+      const col = idx % cols;
+      const row = Math.floor(idx / cols);
+
+      const adjustedWidth = col === cols - 1 ? paneWidth : paneWidth - 1;
+      const adjustedHeight = row === rows - 1 ? paneHeight : paneHeight - 1;
+
+      pane.top = orchestrationHeight + row * paneHeight;
+      pane.left = col * paneWidth;
+      pane.width = adjustedWidth;
+      pane.height = adjustedHeight;
+    });
+  }
+
+  /**
    * Setup keyboard bindings
    */
   setupKeyBindings() {
+    // Handle terminal resize
+    this.screen.on('resize', () => {
+      this.handleResize();
+    });
+
     // Ctrl+C to exit
     this.screen.key(['C-c'], () => {
       this.shutdown();
@@ -1037,10 +1109,15 @@ export class BlessedInteractive {
       if (config.blessed) {
         // Switch to orchestration mode (multi-pane)
         await this.switchToOrchestrationMode();
+        // Mark orchestration as active for auto-scrolling
+        this.orchestrationActive = true;
       }
 
       // Run orchestration
       const result = await this.questionHandler(question, config);
+
+      // Mark orchestration as inactive to allow user scrolling
+      this.orchestrationActive = false;
 
       // Display final answer FIRST (while blessed UI is still active)
       if (result.success && result.finalAnswer) {
@@ -1224,9 +1301,13 @@ export class BlessedInteractive {
     // Create fresh orchestration layout
     this.createOrchestrationLayout(agents);
 
-    // NOTE: Don't set blessed UI here - runOrchestration() will do it
-    // after checking currentMode === ORCHESTRATION
+    // Set blessed UI on logger so orchestration output goes to panels
+    if (this.logger) {
+      this.logger.setBlessedUI(this);
+    }
 
+    // Force screen to recognize new widgets and re-enable input
+    this.screen.realloc();
     this.screen.render();
   }
 
@@ -1237,8 +1318,9 @@ export class BlessedInteractive {
   async switchToInteractiveMode() {
     if (this.currentMode === this.UI_MODES.INTERACTIVE) return;
 
-    // Reset submission guard
+    // Reset submission guard and orchestration flag
     this.isSubmitting = false;
+    this.orchestrationActive = false;
 
     // Clear blessed UI from logger before destroying panels
     if (this.logger) {
@@ -1307,9 +1389,21 @@ export class BlessedInteractive {
     try {
       // Use built-in log() method
       this.orchestrationBox.log(text);
+      // Only auto-scroll during active orchestration to avoid fighting user input
+      if (this.orchestrationActive) {
+        this.orchestrationBox.setScrollPerc(100);
+      }
+      this.screen.render();
     } catch (err) {
       // Silently ignore errors from detached panels
     }
+  }
+
+  /**
+   * Set header message (alias for appendToOrchestrationLog for compatibility)
+   */
+  setHeaderMessage(text) {
+    this.appendToOrchestrationLog(text);
   }
 
   /**
@@ -1332,6 +1426,11 @@ export class BlessedInteractive {
     try {
       // Use built-in log() method
       pane.log(text);
+      // Only auto-scroll during active orchestration to avoid fighting user input
+      if (this.orchestrationActive) {
+        pane.setScrollPerc(100);
+      }
+      this.screen.render();
     } catch (err) {
       // Silently ignore errors from detached panes
     }
