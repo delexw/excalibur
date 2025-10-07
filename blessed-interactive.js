@@ -20,9 +20,13 @@ import { spawnAgentProcess } from './agent-process.js';
 const SCROLLBAR_CONFIG = {
   ch: '█',
   track: {
-    ch: '░'
+    ch: '░',
+    bg: 'black'
   },
-  style: { inverse: true }
+  style: {
+    fg: 'cyan',
+    bg: 'black'
+  }
 };
 
 const COMMON_SCROLLABLE_CONFIG = {
@@ -38,7 +42,7 @@ const COMMON_SCROLLABLE_CONFIG = {
 const COMMON_LOG_CONFIG = {
   ...COMMON_SCROLLABLE_CONFIG,
   alwaysScroll: false, // Don't force auto-scroll - let user control scrolling
-  mouse: true, // Enable mouse scrolling in panels
+  mouse: true, // Enable mouse for wheel events
   interactive: true // Allow user interaction with the log
 };
 
@@ -65,6 +69,7 @@ class WidgetFactory {
       focusable: true,
       input: true,
       tags: true, // Enable markup for blinking cursor
+      mouse: true, // Enable mouse to capture click for focus
       ...options
     });
   }
@@ -122,12 +127,11 @@ export class BlessedInteractive {
     }
 
     this.screen = blessed.screen({
-      smartCSR: false, // Prevent rendering issues with split panes
-      fastCSR: false, // Prevent flickering
+      smartCSR: true,
       title: 'Excalibur - Interactive Mode',
       fullUnicode: false, // Prevent garbled text in VSCode/Cursor terminal
       dockBorders: true, // Prevent border rendering conflicts
-      sendMouse: false, // Disable mouse globally to allow terminal text selection
+      sendMouse: true, // Enable for mouse wheel events
       cursor: {
         artificial: true,
         shape: 'line',
@@ -189,8 +193,31 @@ export class BlessedInteractive {
     this.screen.append(this.inputBox);
     this.screen.append(this.statusBar);
 
+    // Enable mouse events for scrolling
+    this._enableMouseScrolling(this.outputBox);
+
     // Focus input by default - with keys: true, it will accept input
     this.inputBox.focus();
+  }
+
+  /**
+   * Enable mouse scrolling on an element
+   * @private
+   */
+  _enableMouseScrolling(element) {
+    if (!element) return;
+
+    // Mouse wheel up - scroll up (show earlier content)
+    element.on('wheelup', () => {
+      element.scroll(-3); // Positive value scrolls content up
+      this.screen.render();
+    });
+
+    // Mouse wheel down - scroll down (show later content)
+    element.on('wheeldown', () => {
+      element.scroll(3); // Negative value scrolls content down
+      this.screen.render();
+    });
   }
 
   /**
@@ -278,6 +305,13 @@ export class BlessedInteractive {
     // Start cursor blinking animation
     this._startCursorBlink();
 
+    // Keep input box always focused - click anywhere should maintain focus
+    this.screen.on('element click', () => {
+      if (this.inputBox && !this.inputBox.detached) {
+        this.inputBox.focus();
+      }
+    });
+
     // Handle character input manually
     this.inputBox.on('keypress', (ch, key) => {
       if (!key) return;
@@ -354,6 +388,9 @@ export class BlessedInteractive {
     });
     this.screen.append(this.orchestrationBox);
 
+    // Enable mouse scrolling on orchestration log
+    this._enableMouseScrolling(this.orchestrationBox);
+
     // Calculate grid layout for agent panels
     const numAgents = agents.length;
     // Use single column for better readability if 3 or fewer agents
@@ -394,6 +431,9 @@ export class BlessedInteractive {
 
       this.agentPanes.set(agent.id, agentBox);
       this.screen.append(agentBox);
+
+      // Enable mouse scrolling on agent panel
+      this._enableMouseScrolling(agentBox);
     });
   }
 
@@ -1362,11 +1402,6 @@ export class BlessedInteractive {
 
     // Show welcome message
     this.showWelcome();
-
-    // Ensure mouse remains disabled after switching back
-    if (this.screen.program && this.screen.program.disableMouse) {
-      this.screen.program.disableMouse();
-    }
 
     // Force full screen refresh
     this.screen.realloc();
