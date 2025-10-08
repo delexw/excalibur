@@ -71,6 +71,13 @@ function highlightConversation(text, agents, { forBlessed = false, noColor = fal
   if (phase) {
     const phaseLabel = formatText(`[${phase}]`, phaseColor, { bold: true, forBlessed, noColor });
     result = `${phaseLabel} ${result}`;
+  } else {
+    // Status messages (empty phase) - add visual distinction with gray color
+    if (forBlessed) {
+      result = `{gray-fg}${result}{/gray-fg}`;
+    } else if (!noColor) {
+      result = `${ANSI.paint(result, 'gray', noColor)}`;
+    }
   }
 
   // Skip highlighting if colors disabled and not using blessed
