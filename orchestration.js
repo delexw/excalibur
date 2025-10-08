@@ -173,26 +173,41 @@ function checkOwnerApproval(winnerId, votes) {
 /**
  * Log owner approval status
  * @param {Object} approvalResult - Result from checkOwnerApproval
+ * @param {Array} agents - Array of agent objects
+ * @param {string} winnerId - ID of winning proposal
  */
-function logOwnerApproval(approvalResult) {
+function logOwnerApproval(approvalResult, agents, winnerId) {
   const { approved, ownerScores, ownersAboveMin } = approvalResult;
+
+  // Get winner's display name
+  const winnerAgent = agents.find(a => a.id === winnerId);
+  const winnerName = winnerAgent?.displayName || winnerId;
 
   if (!approved) {
     LOGGER.blockTitle(`⚠️  Owner approval required but not met (mode=${OWNER.mode}, minScore=${OWNER.minScore})`);
     for (const ownerId of OWNER.ids) {
       const score = ownerScores.get(ownerId);
+      const agent = agents.find(a => a.id === ownerId);
+      if (!agent) continue;
+
       if (score !== undefined) {
-        const status = score >= OWNER.minScore ? '✓' : '✗';
-        LOGGER.line({ id: 'orchestrator' }, 'owner', `${status} ${ownerId}: ${score.toFixed(2)}`);
+        if (score >= OWNER.minScore) {
+          LOGGER.line(agent, 'owner-approve', `I approve ${winnerName}'s proposal for consensus. During voting, I rated it ${score.toFixed(2)}/1.0, which meets the owner threshold of ${OWNER.minScore}.`);
+        } else {
+          LOGGER.line(agent, 'owner-reject', `I reject ${winnerName}'s proposal for consensus. During voting, I rated it ${score.toFixed(2)}/1.0, which is below the required owner threshold of ${OWNER.minScore}.`);
+        }
       } else {
-        LOGGER.line({ id: 'orchestrator' }, 'owner', `✗ ${ownerId}: no vote`);
+        LOGGER.line(agent, 'owner-reject', `I reject ${winnerName}'s proposal for consensus. I did not vote during the voting phase.`);
       }
     }
   } else if (OWNER.ids.length > 0) {
     LOGGER.blockTitle(`✓ Owner approval granted`);
     for (const ownerId of ownersAboveMin) {
       const score = ownerScores.get(ownerId);
-      LOGGER.line({ id: 'orchestrator' }, 'owner', `✓ ${ownerId}: ${score.toFixed(2)}`);
+      const agent = agents.find(a => a.id === ownerId);
+      if (!agent) continue;
+
+      LOGGER.line(agent, 'owner-approve', `I approve ${winnerName}'s proposal for consensus. During voting, I rated it ${score.toFixed(2)}/1.0, which meets the owner threshold of ${OWNER.minScore}.`);
     }
   }
 }
@@ -667,7 +682,7 @@ export async function runOrchestration(userQuestion, agents, paint) {
 
       // Check owner approval if required
       const approvalResult = checkOwnerApproval(winnerId, okVotes);
-      logOwnerApproval(approvalResult);
+      logOwnerApproval(approvalResult, agents, winnerId);
 
       if (!approvalResult.approved) {
         continue; // Try next round
