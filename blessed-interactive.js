@@ -1463,6 +1463,8 @@ export class BlessedInteractive {
     try {
       // Use built-in log() method
       pane.log(text);
+      // Add extra line break for better readability
+      pane.log('');
       // Only auto-scroll during active orchestration to avoid fighting user input
       if (this.orchestrationActive) {
         pane.setScrollPerc(100);
