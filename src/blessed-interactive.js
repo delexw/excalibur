@@ -84,6 +84,9 @@ export class BlessedInteractive {
 
     if (options.agents) {
       this.sessionManager.setAgents(options.agents);
+      if (this.logger) {
+        this.logger.setAgents(options.agents);
+      }
     }
 
     this.screen = null;

@@ -12,7 +12,6 @@ import { getParserForAgent } from "./parsers/index.js";
 let LOGGER = null;
 let PROMPTS = null;
 let CONSENSUS = null;
-let DELIB = null;
 let OWNER = null;
 let consensusMode = "super";
 let maxRounds = 5;
@@ -23,7 +22,6 @@ export function configureOrchestration(config) {
   LOGGER = config.logger;
   PROMPTS = config.prompts;
   CONSENSUS = config.consensus;
-  DELIB = config.delib;
   OWNER = config.owner;
   consensusMode = config.consensusMode;
   maxRounds = config.maxRounds;
@@ -723,7 +721,8 @@ function formatActionResponse(actionResult, winningPayload, executionResult, orc
   };
 
   LOGGER.blockTitle("🚀 Returning Action Response");
-  LOGGER.line(orchestrator, "action", JSON.stringify(response, null, 2));
+  LOGGER.line(orchestrator, "action", JSON.stringify(response, null, 2), true);
+  LOGGER.line(orchestrator, "action", JSON.stringify(response.execution.output, null, 2));
 
   return JSON.stringify(response, null, 2);
 }
@@ -824,7 +823,7 @@ export async function runOrchestration(userQuestion, agents, paint) {
     );
     LOGGER.line(
       paint(
-        `Consensus=${consensusMode} | thresholds: U=${CONSENSUS.unanimousPct} S=${CONSENSUS.superMajorityPct} M=${CONSENSUS.majorityPct} | blockers=${CONSENSUS.requireNoBlockers ? "strict" : "allowed"} | rubberPenalty=${DELIB.weightPenaltyRubberStamp}\n`,
+        `Consensus=${consensusMode} | thresholds: U=${CONSENSUS.unanimousPct} S=${CONSENSUS.superMajorityPct} M=${CONSENSUS.majorityPct} | blockers=${CONSENSUS.requireNoBlockers ? "strict" : "allowed"} | rubberPenalty=${CONSENSUS.rubberPenalty}\n`,
         "gray",
       ),
     );
@@ -982,6 +981,10 @@ function applyRevisions(current, revisions) {
 async function checkConsensus(roundResult, current, agents, orchestrator) {
   const { votes } = roundResult;
 
+  // TODO: Implement requireNoBlockers - check if any blocker critiques exist and reject consensus if requireNoBlockers is true
+  // const hasBlockers = roundResult.crits?.some(c => c.res?.json?.critiques?.some(crit => crit.points?.some(p => p.severity === 'blocker')));
+  // if (CONSENSUS.requireNoBlockers && hasBlockers) { return { consensusReached: false }; }
+
   // Process votes and check for consensus
   const okVotes = votes.filter((v) => v.res && v.res.ok);
   if (okVotes.length === 0) {
@@ -1001,6 +1004,10 @@ async function checkConsensus(roundResult, current, agents, orchestrator) {
 
   // Calculate vote tallies
   const tallies = calculateVoteTallies(current, okVotes);
+
+  // TODO: Implement rubber-stamp penalty - reduce score for agents that voted without critiquing
+  // const rubberStampAgents = agents.filter(a => !crits.some(c => c.agentId === a.id && c.res?.ok));
+  // Apply CONSENSUS.rubberPenalty to reduce their vote weight
 
   // Check consensus
   const threshold =

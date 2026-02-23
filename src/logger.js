@@ -164,6 +164,11 @@ export class ConversationLogger {
    * "proposal", "critique").
    */
   line(agent, phase, text, fileOnly = false) {
+    if (!agent?.id) {
+      console.warn('Logger: agent.id is missing, skipping file log');
+      return;
+    }
+
     const ts = new Date().toISOString();
     const stream = this.agentFile(agent.id);
 
