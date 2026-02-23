@@ -307,8 +307,9 @@ function formatFinalAnswer(payload) {
 
 // Build a prompt for an agent with optional context
 function buildPrompt(base, question, context = {}, agents = []) {
-  // Replace {{AGENTS}} placeholder with agent list
   let prompt = base;
+  
+  // Replace {{AGENTS}} placeholder with agent list
   if (prompt.includes("{{AGENTS}}")) {
     const agentList = JSON.stringify(
       agents.map((agent) => ({
@@ -321,7 +322,13 @@ function buildPrompt(base, question, context = {}, agents = []) {
     prompt = prompt.replace("{{AGENTS}}", agentList);
   }
 
-  return `${prompt}\n\nUSER QUESTION:\n${question}\n\nCONTEXT:\n${JSON.stringify(context, null, 2)}\n\nReturn JSON only.`;
+  // Replace {{QUESTION}} placeholder
+  prompt = prompt.replace(/\{\{QUESTION\}\}/g, question);
+
+  // Replace {{CONTEXT}} placeholder
+  prompt = prompt.replace(/\{\{CONTEXT\}\}/g, JSON.stringify(context, null, 2));
+
+  return prompt;
 }
 
 // Spawn an agent CLI process with prompt; return JSON output or error (single attempt)
@@ -472,16 +479,20 @@ async function roundPropose(agents, question) {
   return results;
 }
 
-// Critique phase: each agent critiques the current set of proposals
+// Critique phase: each agent critiques the current set of proposals (excluding their own)
 async function roundCritique(agents, question, current) {
-  const prompt = buildPrompt(
-    PROMPTS.critique,
-    question,
-    { current_proposals: current },
-    agents,
-  );
   const results = await Promise.all(
     agents.map(async (a) => {
+      // Filter out this agent's own proposal
+      const otherProposals = current.filter(p => p.agentId !== a.id);
+      
+      const prompt = buildPrompt(
+        PROMPTS.critique,
+        question,
+        { current_proposals: otherProposals },
+        agents,
+      );
+      
       const res = await spawnAgent(a, prompt, 300, "critique");
       return { agentId: a.id, res };
     }),
@@ -511,14 +522,14 @@ async function roundRevise(agents, question, current, critiques) {
       // Collect critiques that this agent received
       const receivedCritiques = [];
       for (const [criticId, critsForThisAgent] of critiqueMap) {
-        // Each critique object has {target_agent_id, severity, detail}
-        const relevantCritiques = critsForThisAgent.filter(
-          (c) => c.target_agent_id === a.id,
+        // Each critique object has {target_agent, severity, detail}
+        const receivedCritiquesForThisAgent = critsForThisAgent.filter(
+          (c) => c.target_agent === a.id,
         );
-        for (const crit of relevantCritiques) {
+        for (const crit of receivedCritiquesForThisAgent) {
           receivedCritiques.push({
             from_agent_id: criticId,
-            ...crit,
+            points: crit.points || []
           });
         }
       }
@@ -864,120 +875,117 @@ export async function runOrchestration(userQuestion, agents, paint) {
 
   // Prepare state: list of current proposals per agent
   let current = okR0.map((p) => ({ agentId: p.agentId, payload: p.res.json }));
-  // Set of seen critique pairs for novelty scoring
-  let seenPairs = new Set();
 
-  // Critique/vote rounds
+  // Run critique/vote rounds
   for (let round = 1; round <= maxRounds; round++) {
-    LOGGER.blockTitle(`Round ${round}: critiques & voting`);
-    LOGGER.line(
-      {
-        id: "orchestrator",
-        avatar: "🗂️",
-        displayName: "Orchestrator",
-        color: "white",
-      },
-      "phase",
-      `Round ${round} - Critiques & voting`,
-    );
-
-    // Show agents are working on critiques
-    for (const agent of agents) {
-      LOGGER.line(agent, "", "Reviewing peer proposals...");
-    }
-
-    // Critique phase
-    const crits = await roundCritique(agents, userQuestion, current);
-
-    // Check for interruption
-    if (checkInterruption(null, true)) {
-      return;
-    }
-
-    // Show agents are working on revisions
-    for (const agent of agents) {
-      LOGGER.line(agent, "", "Revising my proposal based on feedback...");
-    }
-
-    // Revision phase
-    const revisions = await roundRevise(agents, userQuestion, current, crits);
-
-    // Check for interruption
-    if (checkInterruption(null, true)) {
+    const roundResult = await runCritiqueVoteRound(round, agents, userQuestion, current);
+    
+    if (roundResult.interrupted) {
       return;
     }
 
     // Update current proposals with revisions
-    for (const rev of revisions) {
-      if (rev.res && rev.res.ok) {
-        const idx = current.findIndex((p) => p.agentId === rev.agentId);
-        if (idx >= 0) {
-          const originalPayload = current[idx].payload;
-          const revisionPayload = rev.res.json;
-
-          // If revised.proposal is "no change", preserve the original proposal
-          if (revisionPayload.revised?.proposal === "no change") {
-            // Copy the original proposal into the revised structure
-            revisionPayload.revised.proposal =
-              originalPayload.proposal ||
-              originalPayload.revised?.proposal ||
-              "No proposal";
-          }
-
-          current[idx].payload = revisionPayload;
-        }
-      }
-    }
-
-    // Show agents are voting
-    for (const agent of agents) {
-      LOGGER.line(agent, "", "Voting on proposals...");
-    }
-
-    // Voting phase
-    const votes = await roundVote(agents, userQuestion, current);
-
-    // Check for interruption
-    if (checkInterruption(null, true)) {
-      return;
-    }
-
-    // Process votes and check for consensus
-    const okVotes = votes.filter((v) => v.res && v.res.ok);
-    if (okVotes.length === 0) {
-      LOGGER.blockTitle("No votes received, continuing...");
-      LOGGER.line(
-        {
-          id: "orchestrator",
-          avatar: "🗂️",
-          displayName: "Orchestrator",
-          color: "white",
-        },
-        "warn",
-        "No votes received in this round",
-      );
-      continue;
-    }
-
-    // Calculate vote tallies
-    const tallies = calculateVoteTallies(current, okVotes);
+    current = applyRevisions(current, roundResult.revisions);
 
     // Check consensus
-    const threshold =
-      consensusMode === "unanimous"
-        ? CONSENSUS.unanimousPct
-        : consensusMode === "super"
-          ? CONSENSUS.superMajorityPct
-          : CONSENSUS.majorityPct;
+    const consensusResult = await checkConsensus(roundResult, current, agents, orchestrator);
+    
+    if (consensusResult.consensusReached) {
+      return consensusResult.returnValue;
+    }
 
-    const maxScore = Math.max(
-      ...Array.from(tallies.values()).map((t) => t.score),
-    );
-    const normalizedMaxScore = maxScore / okVotes.length;
+    // No consensus, continue to next round
+  }
 
-    LOGGER.blockTitle(
-      `Consensus check: ${normalizedMaxScore.toFixed(2)} vs threshold ${threshold}`,
-    );
+  // No consensus reached after max rounds - get votes from last round
+  const lastRoundVotes = roundResult?.votes || [];
+  return handleNoConsensus(current, orchestrator, lastRoundVotes);
+}
+
+async function runCritiqueVoteRound(round, agents, userQuestion, current) {
+  LOGGER.blockTitle(`Round ${round}: critiques & voting`);
+  LOGGER.line(
+    {
+      id: "orchestrator",
+      avatar: "🗂️",
+      displayName: "Orchestrator",
+      color: "white",
+    },
+    "phase",
+    `Round ${round} - Critiques & voting`,
+  );
+
+  // Show agents are working on critiques
+  for (const agent of agents) {
+    LOGGER.line(agent, "", "Reviewing peer proposals...");
+  }
+
+  // Critique phase
+  const crits = await roundCritique(agents, userQuestion, current);
+
+  // Check for interruption
+  if (checkInterruption(null, true)) {
+    return { interrupted: true };
+  }
+
+  // Show agents are working on revisions
+  for (const agent of agents) {
+    LOGGER.line(agent, "", "Revising my proposal based on feedback...");
+  }
+
+  // Revision phase
+  const revisions = await roundRevise(agents, userQuestion, current, crits);
+
+  // Check for interruption
+  if (checkInterruption(null, true)) {
+    return { interrupted: true };
+  }
+
+  // Show agents are voting
+  for (const agent of agents) {
+    LOGGER.line(agent, "", "Voting on proposals...");
+  }
+
+  // Voting phase
+  const votes = await roundVote(agents, userQuestion, current);
+
+  return {
+    interrupted: false,
+    crits,
+    revisions,
+    votes,
+  };
+}
+
+function applyRevisions(current, revisions) {
+  for (const rev of revisions) {
+    if (rev.res && rev.res.ok) {
+      const idx = current.findIndex((p) => p.agentId === rev.agentId);
+      if (idx >= 0) {
+        const originalPayload = current[idx].payload;
+        const revisionPayload = rev.res.json;
+
+        if (revisionPayload.revised?.proposal === "no change") {
+          revisionPayload.revised.proposal =
+            originalPayload.proposal ||
+            originalPayload.revised?.proposal ||
+            "No proposal";
+        }
+
+        current[idx].payload = revisionPayload;
+      }
+    }
+  }
+  return current;
+}
+
+async function checkConsensus(roundResult, current, agents, orchestrator) {
+  const { votes } = roundResult;
+
+  // Process votes and check for consensus
+  const okVotes = votes.filter((v) => v.res && v.res.ok);
+  if (okVotes.length === 0) {
+    LOGGER.blockTitle("No votes received, continuing...");
     LOGGER.line(
       {
         id: "orchestrator",
@@ -985,75 +993,115 @@ export async function runOrchestration(userQuestion, agents, paint) {
         displayName: "Orchestrator",
         color: "white",
       },
-      "vote",
-      `Consensus check: ${normalizedMaxScore.toFixed(2)} vs threshold ${threshold}`,
+      "warn",
+      "No votes received in this round",
     );
-
-    if (normalizedMaxScore >= threshold) {
-      // Find winning proposal
-      const winnerId = Array.from(tallies.entries()).find(
-        ([id, tally]) => tally.score === maxScore,
-      )?.[0];
-
-      const winner = current.find((p) => p.agentId === winnerId);
-
-      // Check owner approval if required
-      const approvalResult = checkOwnerApproval(winnerId, okVotes);
-      logOwnerApproval(approvalResult, agents, winnerId);
-
-      if (!approvalResult.approved) {
-        continue; // Try next round
-      }
-
-      LOGGER.blockTitle(`✅ Consensus reached! Winner: ${winnerId}`);
-      LOGGER.line(
-        orchestrator,
-        "consensus",
-        `Consensus reached with ${winnerId} - score: ${normalizedMaxScore.toFixed(2)}`,
-      );
-
-      // Debug: log winner structure
-      LOGGER.line(
-        orchestrator,
-        "debug",
-        `Winner payload keys: ${Object.keys(winner.payload || {}).join(", ")}`,
-        true,
-      );
-      LOGGER.line(
-        orchestrator,
-        "debug",
-        `Winner payload: ${JSON.stringify(winner.payload)}`,
-        true,
-      );
-
-      // Extract the winning payload (either direct or revised)
-      const winningPayload = winner.payload.revised || winner.payload;
-
-      // Format final answer using helper function
-      const finalAnswer = formatFinalAnswer(winningPayload);
-
-      // Check if the proposal is actionable and needs agreement
-      const actionResult = await checkActionAgreement(winningPayload, winnerId, agents, orchestrator, finalAnswer);
-
-      // If actionable and needs execution, execute and return action JSON
-      if (actionResult.shouldExecute) {
-        // Show winner agent is executing
-        LOGGER.line(winnerAgent, "", "Executing approved action...");
-        
-        const executionResult = await executeAction(actionResult, winningPayload, agents, orchestrator);
-        return formatActionResponse(actionResult, winningPayload, executionResult, orchestrator);
-      }
-
-      // Format and log the final result
-      LOGGER.blockTitle("===== FINAL ANSWER =====");
-      LOGGER.line(orchestrator, "result", finalAnswer);
-      LOGGER.blockTitle("========================");
-
-      return finalAnswer;
-    }
+    return { consensusReached: false };
   }
 
-  // No consensus reached
+  // Calculate vote tallies
+  const tallies = calculateVoteTallies(current, okVotes);
+
+  // Check consensus
+  const threshold =
+    consensusMode === "unanimous"
+      ? CONSENSUS.unanimousPct
+      : consensusMode === "super"
+        ? CONSENSUS.superMajorityPct
+        : CONSENSUS.majorityPct;
+
+  const maxScore = Math.max(
+    ...Array.from(tallies.values()).map((t) => t.score),
+  );
+  const normalizedMaxScore = maxScore / okVotes.length;
+
+  LOGGER.blockTitle(
+    `Consensus check: ${normalizedMaxScore.toFixed(2)} vs threshold ${threshold}`,
+  );
+  LOGGER.line(
+    {
+      id: "orchestrator",
+      avatar: "🗂️",
+      displayName: "Orchestrator",
+      color: "white",
+    },
+    "vote",
+    `Consensus check: ${normalizedMaxScore.toFixed(2)} vs threshold ${threshold}`,
+  );
+
+  if (normalizedMaxScore >= threshold) {
+    // Find winning proposal
+    const winnerId = Array.from(tallies.entries()).find(
+      ([id, tally]) => tally.score === maxScore,
+    )?.[0];
+
+    const winner = current.find((p) => p.agentId === winnerId);
+
+    // Check owner approval if required
+    const approvalResult = checkOwnerApproval(winnerId, okVotes);
+    logOwnerApproval(approvalResult, agents, winnerId);
+
+    if (!approvalResult.approved) {
+      return { consensusReached: false };
+    }
+
+    LOGGER.blockTitle(`✅ Consensus reached! Winner: ${winnerId}`);
+    LOGGER.line(
+      orchestrator,
+      "consensus",
+      `Consensus reached with ${winnerId} - score: ${normalizedMaxScore.toFixed(2)}`,
+    );
+
+    // Debug: log winner structure
+    LOGGER.line(
+      orchestrator,
+      "debug",
+      `Winner payload keys: ${Object.keys(winner.payload || {}).join(", ")}`,
+      true,
+    );
+    LOGGER.line(
+      orchestrator,
+      "debug",
+      `Winner payload: ${JSON.stringify(winner.payload)}`,
+      true,
+    );
+
+    // Extract the winning payload (either direct or revised)
+    const winningPayload = winner.payload.revised || winner.payload;
+
+    // Format final answer using helper function
+    const finalAnswerText = formatFinalAnswer(winningPayload);
+
+    // Check if the proposal is actionable and needs agreement
+    return await handleConsensusReached(winningPayload, winnerId, winner, agents, orchestrator, finalAnswerText);
+  }
+
+  return { consensusReached: false };
+}
+
+async function handleConsensusReached(winningPayload, winnerId, winner, agents, orchestrator, finalAnswer) {
+  const actionResult = await checkActionAgreement(winningPayload, winnerId, agents, orchestrator, finalAnswer);
+
+  if (actionResult.shouldExecute) {
+    const winnerAgent = agents.find(a => a.id === winnerId);
+    LOGGER.line(winnerAgent, "", "Executing approved action...");
+    
+    const executionResult = await executeAction(actionResult, winningPayload, agents, orchestrator);
+    return { 
+      consensusReached: true, 
+      returnValue: formatActionResponse(actionResult, winningPayload, executionResult, orchestrator) 
+    };
+  }
+
+  // Format and log the final result
+  LOGGER.blockTitle("===== FINAL ANSWER =====");
+  LOGGER.line(orchestrator, "result", finalAnswer);
+  LOGGER.blockTitle("========================");
+
+  return { consensusReached: true, returnValue: finalAnswer };
+}
+
+function handleNoConsensus(current, orchestrator, lastRoundVotes) {
   LOGGER.blockTitle("❌ No consensus reached after maximum rounds");
   LOGGER.line(
     orchestrator,
@@ -1061,19 +1109,24 @@ export async function runOrchestration(userQuestion, agents, paint) {
     `No consensus reached after ${maxRounds} rounds`,
   );
 
-  // Return the highest-scored proposal
-  const tallies = new Map();
-  for (const agentId of current.map((p) => p.agentId)) {
-    tallies.set(agentId, { score: 0 });
+  // Calculate tallies from last round votes
+  const okVotes = lastRoundVotes.filter((v) => v.res && v.res.ok);
+  
+  let tallies;
+  let winnerId;
+  
+  if (okVotes.length > 0) {
+    tallies = calculateVoteTallies(current, okVotes);
+    const maxScore = Math.max(
+      ...Array.from(tallies.values()).map((t) => t.score),
+    );
+    winnerId = Array.from(tallies.entries()).find(
+      ([id, tally]) => tally.score === maxScore,
+    )?.[0];
+  } else {
+    // No votes - just pick first proposal
+    winnerId = current[0]?.agentId;
   }
-
-  // Recalculate final tallies
-  const maxScore = Math.max(
-    ...Array.from(tallies.values()).map((t) => t.score),
-  );
-  const winnerId = Array.from(tallies.entries()).find(
-    ([id, tally]) => tally.score === maxScore,
-  )?.[0];
 
   const winner = current.find((p) => p.agentId === winnerId);
 

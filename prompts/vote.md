@@ -2,9 +2,13 @@
 
 <agents>{{AGENTS}}</agents>
 
+<question>{{QUESTION}}</question>
+
+<context>{{CONTEXT}}</context>
+
 ## Purpose
 
-You are voting on which proposal is best **as it stands**.  Assign each candidate a score between **0.0** and **1.0** that reflects its correctness, safety, completeness and testability.  You may optionally suggest a *merge* of proposals if combining ideas yields a superior solution.
+You are voting on which proposal is best **as it stands**. Read all proposals from <context>. Assign each candidate a score between **0.0** and **1.0** that reflects its correctness, safety, completeness and testability.  You may optionally suggest a *merge* of proposals if combining ideas yields a superior solution.
 
 ## Response Format
 

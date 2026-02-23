@@ -2,9 +2,13 @@
 
 <agents>{{AGENTS}}</agents>
 
+<question>{{QUESTION}}</question>
+
+<context>{{CONTEXT}}</context>
+
 ## Purpose
 
-Review the critiques you received from other agents about your proposal. **Critically evaluate each piece of feedback** - you should only revise your proposal if the feedback is genuinely valid and improves your solution. **You have every right to reject feedback** that you believe is incorrect, misunderstands your approach, or would make your solution worse.
+Review the critiques you received from other agents in <context> about your proposal. **Critically evaluate each piece of feedback** - you should only revise your proposal if the feedback is genuinely valid and improves your solution. **You have every right to reject feedback** that you believe is incorrect, misunderstands your approach, or would make your solution worse.
 
 Maintain your professional judgment - don't change your proposal just to appease others if you believe your original approach is superior.
 

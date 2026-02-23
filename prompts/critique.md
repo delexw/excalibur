@@ -2,9 +2,13 @@
 
 <agents>{{AGENTS}}</agents>
 
+<question>{{QUESTION}}</question>
+
+<context>{{CONTEXT}}</context>
+
 ## Purpose
 
-Review the proposals submitted by **other agents only** (do not critique your own proposal).  Provide *substantive* and *novel* critiques.  If there are serious issues with any proposal, you must include at least one **major** or **blocker** critique.  Avoid simply agreeing with all proposals (rubber‑stamping).
+Review the proposals submitted by **other agents only** (do not critique your own proposal) from <context>.  Provide *substantive* and *novel* critiques.  If there are serious issues with any proposal, you must include at least one **major** or **blocker** critique.  Avoid simply agreeing with all proposals (rubber‑stamping).
 
 Refer directly to specific claims or lines (quote minimally) to make your critique clear, and explain the impact of the issue along with a recommended fix.
 

@@ -89,7 +89,6 @@ export class BlessedInteractive {
     this.orchestrationBox = null;
 
     this.agentPanes = new Map();
-    this.activeProcesses = new Map(); // Active spawned processes for cleanup
     this.commandHistory = [];
     this.historyIndex = -1;
     this.commandDropdown = null; // For command autocomplete dropdown
@@ -1133,6 +1132,9 @@ export class BlessedInteractive {
   async _spawnAgentProcess(agent, prompt) {
     let buffer = "";
 
+    // Use global activeProcesses to ensure proper tracking and cleanup
+    const processTracker = global.activeProcesses;
+
     // Use shared spawn utility with streaming callback
     const result = await spawnAgentProcess(agent, prompt, {
       onStdout: (text) => {
@@ -1152,7 +1154,7 @@ export class BlessedInteractive {
           }
         }
       },
-      processTracker: this.activeProcesses,
+      processTracker,
     });
 
     // Display any remaining buffer
@@ -1172,11 +1174,6 @@ export class BlessedInteractive {
     // Create agent panels if blessed UI is enabled
     if (config.blessed && this.currentMode === this.UI_MODES.INTERACTIVE) {
       await this.switchToAgentChatMode();
-    }
-
-    // Initialize active processes map if needed
-    if (!this.activeProcesses) {
-      this.activeProcesses = new Map();
     }
 
     // Send to each selected agent
@@ -1747,16 +1744,17 @@ export class BlessedInteractive {
       this._agentAnimations.clear();
     }
 
-    // Kill all active processes
-    if (this.activeProcesses) {
-      for (const [agentId, proc] of this.activeProcesses.entries()) {
+    // Kill all active processes using global tracker
+    const activeProcs = global.activeProcesses;
+    if (activeProcs && activeProcs.size > 0) {
+      for (const proc of activeProcs) {
         try {
           proc.kill("SIGTERM");
         } catch (err) {
           // Ignore errors during cleanup
         }
       }
-      this.activeProcesses.clear();
+      activeProcs.clear();
     }
 
     // Destroy screen (which destroys all children including panels)
