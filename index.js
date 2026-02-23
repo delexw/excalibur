@@ -616,55 +616,32 @@ function loadAgents() {
   const shouldUseInteractive = argv.includes('--interactive') || !hasQuestion;
 
   if (shouldUseInteractive) {
-    const agents = loadAgents();
-
-    const interactive = new BlessedInteractive({
-      sessionManager: new SessionManager(),
-      logger: LOGGER
-    });
-
-    // Set up question handler to run orchestration
-    interactive.setQuestionHandler(async (question, config) => {
-      const agents = loadAgents();
-
-      try {
-        // Apply runtime configuration from interactive mode
-        applyRuntimeConfig(config);
-
-        // Configure orchestration module
-        configureOrchestration({
-          logger: LOGGER,
-          prompts: PROMPTS,
-          consensus: CONSENSUS,
-          delib: DELIB,
-          owner: OWNER,
-          consensusMode,
-          maxRounds,
-          activeProcesses
-        });
-
-        // Run the full orchestration using the global LOGGER
-        const finalAnswer = await runOrchestration(question, agents, paint);
-        return { success: true, finalAnswer };
-      } catch (error) {
-        console.error('Orchestration failed:', error);
-        return { success: false, error: error.message };
-      } finally {
-        // Interactive UI lifecycle is managed by blessed-interactive.js
-      }
-    });
-
-    // Load agents for interactive session
-    interactive.sessionManager.setAgents(agents);
-
-    await interactive.start();
+    await runInteractiveMode();
     return;
   }
 
-  // Non-interactive mode continues as before
+  await runNonInteractiveMode(userQuestion);
+})(); // End of main async function
+
+async function runInteractiveMode() {
   const agents = loadAgents();
 
-  // Configure orchestration module
+  const interactive = new BlessedInteractive({
+    sessionManager: new SessionManager(),
+    logger: LOGGER
+  });
+
+  interactive.setQuestionHandler(async (question, config) => {
+    return runOrchestrationWithErrorHandling(question, config);
+  });
+
+  interactive.sessionManager.setAgents(agents);
+  await interactive.start();
+}
+
+async function runNonInteractiveMode(question) {
+  const agents = loadAgents();
+
   configureOrchestration({
     logger: LOGGER,
     prompts: PROMPTS,
@@ -676,5 +653,49 @@ function loadAgents() {
     activeProcesses
   });
 
-  await runOrchestration(userQuestion, agents, paint);
-})(); // End of main async function
+  try {
+    await runOrchestration(question, agents, paint);
+  } catch (error) {
+    handleOrchestrationError(error);
+  }
+}
+
+async function runOrchestrationWithErrorHandling(question, config = {}) {
+  const agents = loadAgents();
+
+  try {
+    // Apply runtime configuration from interactive mode
+    applyRuntimeConfig(config);
+
+    // Configure orchestration module
+    configureOrchestration({
+      logger: LOGGER,
+      prompts: PROMPTS,
+      consensus: CONSENSUS,
+      delib: DELIB,
+      owner: OWNER,
+      consensusMode,
+      maxRounds,
+      activeProcesses
+    });
+
+    // Run the full orchestration using the global LOGGER
+    const finalAnswer = await runOrchestration(question, agents, paint);
+    return { success: true, finalAnswer };
+  } catch (error) {
+    handleOrchestrationError(error);
+    return { success: false, error: error.message };
+  }
+}
+
+function handleOrchestrationError(error) {
+  console.error('Orchestration failed:', error.message);
+  if (LOGGER) {
+    LOGGER.line(
+      { id: 'orchestrator', displayName: 'Orchestrator', color: 'red' },
+      'error',
+      `Orchestration failed: ${error.message}`
+    );
+  }
+  process.exit(1);
+}

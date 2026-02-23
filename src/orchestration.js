@@ -554,6 +554,12 @@ export async function runOrchestration(userQuestion, agents, paint) {
   // Reset interruption flag at the start
   global.orchestrationInterrupted = false;
 
+  const orchestrator = {
+    id: "orchestrator",
+    displayName: "Orchestrator",
+    avatar: "⚔️",
+  };
+
   // Set agents in logger for conversation highlighting
   LOGGER.setAgents(agents);
 
@@ -769,11 +775,6 @@ export async function runOrchestration(userQuestion, agents, paint) {
       );
 
       // Debug: log winner structure
-      const orchestrator = {
-        id: "orchestrator",
-        displayName: "Orchestrator",
-        avatar: "⚔️",
-      };
       LOGGER.line(
         orchestrator,
         "debug",
@@ -833,11 +834,6 @@ export async function runOrchestration(userQuestion, agents, paint) {
   const finalAnswer = formatFinalAnswer(winningPayload);
 
   // Format and log the result
-  const orchestrator = {
-    id: "orchestrator",
-    displayName: "Orchestrator",
-    avatar: "⚔️",
-  };
   LOGGER.blockTitle("===== BEST CANDIDATE =====");
   LOGGER.line(
     orchestrator,
