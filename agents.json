@@ -8,7 +8,8 @@
     "supportsSystemPrefix": true,
     "timeoutMs": 300000,
     "avatar": "🦉",
-    "color": "cyan"
+    "color": "cyan",
+    "responseParser": "default"
   },
   {
     "id": "gemini-pro",
@@ -19,7 +20,8 @@
     "supportsSystemPrefix": true,
     "timeoutMs": 300000,
     "avatar": "💎",
-    "color": "magenta"
+    "color": "magenta",
+    "responseParser": "gemini"
   },
   {
     "id": "codex",
@@ -30,6 +32,7 @@
     "supportsSystemPrefix": true,
     "timeoutMs": 300000,
     "avatar": "🧠",
-    "color": "green"
+    "color": "green",
+    "responseParser": "codex"
   }
 ]

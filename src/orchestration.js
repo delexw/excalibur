@@ -6,6 +6,7 @@
  */
 
 import { spawnAgentProcess } from './agent-process.js';
+import { getParserForAgent } from './parsers/index.js';
 
 // Will be injected by index.js
 let LOGGER = null;
@@ -185,6 +186,7 @@ function logOwnerApproval(approvalResult, agents, winnerId) {
 
   if (!approved) {
     LOGGER.blockTitle(`⚠️  Owner approval required but not met (mode=${OWNER.mode}, minScore=${OWNER.minScore})`);
+    LOGGER.line({ id: 'orchestrator', avatar: '🗂️', displayName: 'Orchestrator', color: 'white' }, 'owner', `Owner approval not met - mode=${OWNER.mode}, minScore=${OWNER.minScore}`);
     for (const ownerId of OWNER.ids) {
       const score = ownerScores.get(ownerId);
       const agent = agents.find(a => a.id === ownerId);
@@ -202,6 +204,7 @@ function logOwnerApproval(approvalResult, agents, winnerId) {
     }
   } else if (OWNER.ids.length > 0) {
     LOGGER.blockTitle(`✓ Owner approval granted`);
+    LOGGER.line({ id: 'orchestrator', avatar: '🗂️', displayName: 'Orchestrator', color: 'white' }, 'owner', `Owner approval granted - owners: ${ownersAboveMin.join(', ')}`);
     for (const ownerId of ownersAboveMin) {
       const score = ownerScores.get(ownerId);
       const agent = agents.find(a => a.id === ownerId);
@@ -245,97 +248,6 @@ function formatFinalAnswer(payload) {
   return sections.join('\n');
 }
 
-// Extract the JSON body from agent output using format-specific approach
-function normalizeJsonText(txt) {
-  // Handle Codex FIRST - extract content between "codex" line and "tokens used" line
-  if (txt.includes('OpenAI Codex') || txt.includes('codex\n')) {
-    const lines = txt.split('\n');
-    let codexLineIdx = -1;
-    let tokensLineIdx = -1;
-
-    // Find the line that is exactly "codex" or "[timestamp] codex" (not "model: gpt-5-codex")
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim();
-      // Match only if the line is exactly "codex" or ends with "codex" after a timestamp
-      if (line === 'codex' || /^\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\]\s*codex$/.test(line)) {
-        codexLineIdx = i;
-        break;
-      }
-    }
-
-    // Find the line that contains "tokens used" after the codex line
-    if (codexLineIdx >= 0) {
-      for (let i = codexLineIdx + 1; i < lines.length; i++) {
-        if (lines[i].includes('tokens used')) {
-          tokensLineIdx = i;
-          break;
-        }
-      }
-    }
-
-    // Extract content between these two lines, filtering out empty lines
-    if (codexLineIdx >= 0 && tokensLineIdx > codexLineIdx) {
-      const contentLines = lines.slice(codexLineIdx + 1, tokensLineIdx).filter(line => line.trim() !== '');
-      txt = contentLines.join('\n').trim();
-    } else if (codexLineIdx >= 0) {
-      // If no tokens line found, take everything after codex line
-      const contentLines = lines.slice(codexLineIdx + 1).filter(line => line.trim() !== '');
-      txt = contentLines.join('\n').trim();
-    }
-
-    // For Codex, try to validate the extracted JSON immediately
-    try {
-      JSON.parse(txt);
-      return txt;
-    } catch (e) {
-      // If JSON parsing fails, try to find just the outermost braces
-      const first = txt.indexOf('{');
-      const last = txt.lastIndexOf('}');
-      if (first >= 0 && last > first) {
-        const candidate = txt.slice(first, last + 1);
-        try {
-          JSON.parse(candidate);
-          return candidate;
-        } catch (e2) {
-          // If that fails too, return the original extracted text
-          return txt;
-        }
-      }
-      return txt;
-    }
-  }
-
-  // Handle Gemini - remove markdown code blocks if present
-  if (txt.includes('```json')) {
-    const jsonStart = txt.indexOf('```json') + 7;
-    const jsonEnd = txt.indexOf('```', jsonStart);
-    if (jsonEnd > jsonStart) {
-      txt = txt.slice(jsonStart, jsonEnd).trim();
-    }
-  }
-
-  // Generic fallback - find the outermost JSON object
-  const first = txt.indexOf('{');
-  const last = txt.lastIndexOf('}');
-
-  if (first >= 0 && last > first) {
-    // Extract content between first { and last }
-    const jsonCandidate = txt.slice(first, last + 1).trim();
-
-    // Validate it's proper JSON by trying to parse
-    try {
-      JSON.parse(jsonCandidate);
-      return jsonCandidate;
-    } catch (e) {
-      // If parsing fails, fall back to original text
-      return txt.trim();
-    }
-  }
-
-  // If no braces found, return original text
-  return txt.trim();
-}
-
 // Build a prompt for an agent with optional context
 function buildPrompt(base, question, context = {}, agents = []) {
   // Replace {{AGENTS}} placeholder with agent list
@@ -374,17 +286,14 @@ async function spawnAgentOncePTY(agent, prompt, timeoutSec, phase = 'response') 
 
     let stdout = result.output;
 
+    // Get parser for this agent (uses default if not specified)
+    const parser = getParserForAgent(agent);
+
     try {
       // Log raw stdout for debugging
       LOGGER.line(agent, 'response:raw', stdout, true);
 
-      // Strip ANSI escape codes before JSON parsing
-      // eslint-disable-next-line no-control-regex
-      stdout = stdout.replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, '');
-      stdout = stdout.replace(/\x1B\][^\x07]*\x07/g, '');
-      stdout = stdout.replace(/\x1B[P\]^_][^\x07\x1B]*[\x07\x1B]/g, '');
-
-      const normalizedJsonText = normalizeJsonText(stdout);
+      const normalizedJsonText = parser.parse(stdout);
 
       // Log normalized text for debugging
       LOGGER.line(agent, 'response:normalized', normalizedJsonText, true);
@@ -566,6 +475,7 @@ export async function runOrchestration(userQuestion, agents, paint) {
 
   // Display session configuration
   LOGGER.blockTitle(`Session ${LOGGER.session} — ${agents.length} agents`);
+  LOGGER.line({ id: 'orchestrator', avatar: '🗂️', displayName: 'Orchestrator', color: 'white' }, 'phase', `Session start - ${agents.length} agents`);
 
   if (!LOGGER.quiet) {
     console.log(paint(`Owners: ${OWNER.ids.length ? OWNER.ids.join(', ') : 'none'} | ownerMin=${OWNER.minScore} | ownerMode=${OWNER.mode}\n`, 'gray'));
@@ -577,6 +487,7 @@ export async function runOrchestration(userQuestion, agents, paint) {
 
   // Round 0: initial proposals
   LOGGER.blockTitle('Initial Proposals ......');
+  LOGGER.line({ id: 'orchestrator', avatar: '🗂️', displayName: 'Orchestrator', color: 'white' }, 'phase', 'Round 0 - Initial proposals');
 
   // Show agents are working on their proposals
   for (const agent of agents) {
@@ -604,6 +515,7 @@ export async function runOrchestration(userQuestion, agents, paint) {
   // Critique/vote rounds
   for (let round = 1; round <= maxRounds; round++) {
     LOGGER.blockTitle(`Round ${round}: critiques & voting`);
+    LOGGER.line({ id: 'orchestrator', avatar: '🗂️', displayName: 'Orchestrator', color: 'white' }, 'phase', `Round ${round} - Critiques & voting`);
 
     // Show agents are working on critiques
     for (const agent of agents) {
@@ -657,6 +569,7 @@ export async function runOrchestration(userQuestion, agents, paint) {
     const okVotes = votes.filter(v => v.res && v.res.ok);
     if (okVotes.length === 0) {
       LOGGER.blockTitle('No votes received, continuing...');
+      LOGGER.line({ id: 'orchestrator', avatar: '🗂️', displayName: 'Orchestrator', color: 'white' }, 'warn', 'No votes received in this round');
       continue;
     }
 
@@ -672,6 +585,7 @@ export async function runOrchestration(userQuestion, agents, paint) {
     const normalizedMaxScore = maxScore / okVotes.length;
 
     LOGGER.blockTitle(`Consensus check: ${normalizedMaxScore.toFixed(2)} vs threshold ${threshold}`);
+  LOGGER.line({ id: 'orchestrator', avatar: '🗂️', displayName: 'Orchestrator', color: 'white' }, 'vote', `Consensus check: ${normalizedMaxScore.toFixed(2)} vs threshold ${threshold}`);
 
     if (normalizedMaxScore >= threshold) {
       // Find winning proposal
@@ -689,6 +603,7 @@ export async function runOrchestration(userQuestion, agents, paint) {
       }
 
       LOGGER.blockTitle(`✅ Consensus reached! Winner: ${winnerId}`);
+      LOGGER.line(orchestrator, 'consensus', `Consensus reached with ${winnerId} - score: ${normalizedMaxScore.toFixed(2)}`);
 
       // Debug: log winner structure
       const orchestrator = { id: 'orchestrator', displayName: 'Orchestrator', avatar: '⚔️' };
@@ -712,6 +627,7 @@ export async function runOrchestration(userQuestion, agents, paint) {
 
   // No consensus reached
   LOGGER.blockTitle('❌ No consensus reached after maximum rounds');
+  LOGGER.line(orchestrator, 'consensus', `No consensus reached after ${maxRounds} rounds`);
 
   // Return the highest-scored proposal
   const tallies = new Map();
