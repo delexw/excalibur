@@ -35,11 +35,11 @@ import path from 'node:path';
 import os from 'node:os';
 // Additional imports to support file resolution and external helpers
 import { fileURLToPath } from 'node:url';
-import { ANSI, ConversationLogger } from './logger.js';
-import { SessionManager } from './session-manager.js';
-import { BlessedInteractive } from './blessed-interactive.js';
-import { spawnAgentProcess } from './agent-process.js';
-import { runOrchestration, configureOrchestration } from './orchestration.js';
+import { ANSI, ConversationLogger } from './src/logger.js';
+import { SessionManager } from './src/session-manager.js';
+import { BlessedInteractive } from './src/blessed-interactive.js';
+import { spawnAgentProcess } from './src/agent-process.js';
+import { runOrchestration, configureOrchestration } from './src/orchestration.js';
 
 // ----- Signal handling for graceful shutdown --------------------------------
 const activeProcesses = new Set();

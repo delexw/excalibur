@@ -45,5 +45,8 @@
     "README.md",
     "CLAUDE.md"
   ],
-  "preferGlobal": true
+  "preferGlobal": true,
+  "dependencies": {
+    "blessed": "^0.1.81"
+  }
 }

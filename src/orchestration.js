@@ -403,7 +403,7 @@ async function spawnAgentOncePTY(agent, prompt, timeoutSec, phase = 'response') 
     } catch (parseErr) {
       // Log the failed normalized text to help debug
       const normalizedJsonText = normalizeJsonText(stdout);
-      LOGGER.line(agent, 'parse:error', `Parse failed. Normalized text: ${normalizedJsonText.substring(0, 200)}...`, true);
+      LOGGER.line(agent, 'parse:error', `Parse failed. Normalized text: ${normalizedJsonText}...`, true);
 
       // Set agent status to failed
       if (LOGGER.blessedUI && LOGGER.blessedUI.setAgentStatus) {
@@ -693,7 +693,7 @@ export async function runOrchestration(userQuestion, agents, paint) {
       // Debug: log winner structure
       const orchestrator = { id: 'orchestrator', displayName: 'Orchestrator', avatar: '⚔️' };
       LOGGER.line(orchestrator, 'debug', `Winner payload keys: ${Object.keys(winner.payload || {}).join(', ')}`, true);
-      LOGGER.line(orchestrator, 'debug', `Winner payload: ${JSON.stringify(winner.payload).substring(0, 200)}`, true);
+      LOGGER.line(orchestrator, 'debug', `Winner payload: ${JSON.stringify(winner.payload)}`, true);
 
       // Extract the winning payload (either direct or revised)
       const winningPayload = winner.payload.revised || winner.payload;
