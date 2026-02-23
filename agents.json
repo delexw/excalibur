@@ -34,5 +34,17 @@
     "avatar": "🧠",
     "color": "green",
     "responseParser": "codex"
+  },
+  {
+    "id": "opencode",
+    "displayName": "OpenCode CLI",
+    "cmd": "opencode",
+    "args": ["run", "{PROMPT}"],
+    "inputMode": "arg",
+    "supportsSystemPrefix": true,
+    "timeoutMs": 300000,
+    "avatar": "💻",
+    "color": "blue",
+    "responseParser": "default"
   }
 ]

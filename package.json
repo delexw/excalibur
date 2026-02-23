@@ -9,7 +9,7 @@
   "type": "module",
   "scripts": {
     "start": "node index.js",
-    "postinstall": "node scripts/postinstall.js"
+    "postinstall": "node scripts/postinstall.js --force"
   },
   "keywords": [
     "ai",

@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-function setupUserConfig() {
+function setupUserConfig(force = false) {
   try {
     // Create ~/.excalibur directory
     const excaliburDir = path.join(os.homedir(), '.excalibur');
@@ -23,11 +23,11 @@ function setupUserConfig() {
     const sourceConfig = path.join(__dirname, '..', 'agents.json');
     const userConfig = path.join(excaliburDir, 'agents.json');
 
-    // Only copy if user config doesn't exist (don't overwrite existing configs)
-    if (!fs.existsSync(userConfig)) {
+    // Copy if user config doesn't exist OR force flag is set
+    if (!fs.existsSync(userConfig) || force) {
       if (fs.existsSync(sourceConfig)) {
         fs.copyFileSync(sourceConfig, userConfig);
-        console.log('✅ Excalibur config created at ~/.excalibur/agents.json');
+        console.log(force ? '🔄 Excalibur config refreshed at ~/.excalibur/agents.json' : '✅ Excalibur config created at ~/.excalibur/agents.json');
         console.log('   Edit this file to configure your AI agents');
         console.log('   Run "excalibur --config" to see configuration options');
       } else {
@@ -47,7 +47,8 @@ function setupUserConfig() {
 
 // Only run if this script is executed directly (not imported)
 if (import.meta.url === `file://${process.argv[1]}`) {
-  setupUserConfig();
+  const force = process.argv.includes('--force');
+  setupUserConfig(force);
 }
 
 export { setupUserConfig };
