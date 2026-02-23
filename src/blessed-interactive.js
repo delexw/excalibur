@@ -12,21 +12,21 @@
  * This is a complete replacement for the custom readline-based interactive.js
  */
 
-import blessed from 'blessed';
-import { SessionManager } from './session-manager.js';
-import { spawnAgentProcess } from './agent-process.js';
+import blessed from "blessed";
+import { SessionManager } from "./session-manager.js";
+import { spawnAgentProcess } from "./agent-process.js";
 
 // Common widget configurations (DRY principle)
 const SCROLLBAR_CONFIG = {
-  ch: '█',
+  ch: "█",
   track: {
-    ch: '░',
-    bg: 'black'
+    ch: "░",
+    bg: "black",
   },
   style: {
-    fg: 'cyan',
-    bg: 'black'
-  }
+    fg: "cyan",
+    bg: "black",
+  },
 };
 
 const COMMON_SCROLLABLE_CONFIG = {
@@ -36,14 +36,14 @@ const COMMON_SCROLLABLE_CONFIG = {
   vi: true,
   focusable: true, // Make panels focusable for keyboard scrolling
   scrollbar: SCROLLBAR_CONFIG,
-  wrap: true // Enable word wrapping for long text
+  wrap: true, // Enable word wrapping for long text
 };
 
 const COMMON_LOG_CONFIG = {
   ...COMMON_SCROLLABLE_CONFIG,
   alwaysScroll: false, // Don't force auto-scroll - let user control scrolling
   mouse: true, // Enable mouse for wheel events
-  interactive: true // Allow user interaction with the log
+  interactive: true, // Allow user interaction with the log
 };
 
 // Widget factory methods (Factory Pattern)
@@ -51,14 +51,14 @@ class WidgetFactory {
   static createScrollableLog(options) {
     return blessed.log({
       ...COMMON_LOG_CONFIG,
-      ...options
+      ...options,
     });
   }
 
   static createBox(options) {
     return blessed.box({
       tags: true,
-      ...options
+      ...options,
     });
   }
 
@@ -70,7 +70,7 @@ class WidgetFactory {
       input: true,
       tags: true, // Enable markup for blinking cursor
       mouse: true, // Enable mouse to capture click for focus
-      ...options
+      ...options,
     });
   }
 }
@@ -96,9 +96,9 @@ export class BlessedInteractive {
 
     // UI Mode state - use enum pattern for clarity
     this.UI_MODES = {
-      INTERACTIVE: 'interactive',
-      ORCHESTRATION: 'orchestration',
-      AGENT_CHAT: 'agent_chat'
+      INTERACTIVE: "interactive",
+      ORCHESTRATION: "orchestration",
+      AGENT_CHAT: "agent_chat",
     };
     this.currentMode = this.UI_MODES.INTERACTIVE;
     this.selectedAgents = []; // For agent chat mode
@@ -122,27 +122,30 @@ export class BlessedInteractive {
    */
   createScreen() {
     // Force xterm-256color for better compatibility with VSCode/Cursor terminals
-    if (!process.env.TERM || process.env.TERM === 'vscode') {
-      process.env.TERM = 'xterm-256color';
+    if (!process.env.TERM || process.env.TERM === "vscode") {
+      process.env.TERM = "xterm-256color";
     }
+
+    // Check if terminal supports Unicode/emoji (exclude dumb terminals)
+    const useUnicode = process.env.TERM !== "dumb";
 
     this.screen = blessed.screen({
       smartCSR: true,
-      title: 'Excalibur - Interactive Mode',
-      fullUnicode: false, // Prevent garbled text in VSCode/Cursor terminal
+      title: "Excalibur - Interactive Mode",
+      fullUnicode: useUnicode, // Enable full Unicode for emoji support
       dockBorders: true, // Prevent border rendering conflicts
       sendMouse: true, // Enable for mouse wheel events
       cursor: {
         artificial: true,
-        shape: 'line',
+        shape: "line",
         blink: true,
-        color: 'white'
+        color: "white",
       },
-      warnings: false
+      warnings: false,
     });
 
     // Disable Tab for focus switching - we handle it manually
-    this.screen.ignoreLocked = ['tab'];
+    this.screen.ignoreLocked = ["tab"];
   }
 
   /**
@@ -153,24 +156,24 @@ export class BlessedInteractive {
     this.logoBox = WidgetFactory.createBox({
       top: 0,
       left: 0,
-      width: '100%',
+      width: "100%",
       height: 10,
       content: this.getLogoText(),
       style: {
-        fg: 'cyan',
-        bold: true
-      }
+        fg: "cyan",
+        bold: true,
+      },
     });
 
     // Output/history box in middle
     this.outputBox = WidgetFactory.createScrollableLog({
       top: 10,
       left: 0,
-      width: '100%',
-      height: '100%-13',
+      width: "100%",
+      height: "100%-13",
       style: {
-        fg: 'white'
-      }
+        fg: "white",
+      },
     });
 
     // Create input box with event handlers
@@ -180,12 +183,12 @@ export class BlessedInteractive {
     this.statusBar = WidgetFactory.createBox({
       bottom: 0,
       left: 0,
-      width: '100%',
+      width: "100%",
       height: 2,
       content: this.getStatusText(),
       style: {
-        fg: 'gray'
-      }
+        fg: "gray",
+      },
     });
 
     this.screen.append(this.logoBox);
@@ -208,13 +211,13 @@ export class BlessedInteractive {
     if (!element) return;
 
     // Mouse wheel up - scroll up (show earlier content)
-    element.on('wheelup', () => {
+    element.on("wheelup", () => {
       element.scroll(-3); // Positive value scrolls content up
       this.screen.render();
     });
 
     // Mouse wheel down - scroll down (show later content)
-    element.on('wheeldown', () => {
+    element.on("wheeldown", () => {
       element.scroll(3); // Negative value scrolls content down
       this.screen.render();
     });
@@ -226,8 +229,8 @@ export class BlessedInteractive {
    */
   _updateInputCursor() {
     if (!this.inputBox) return;
-    const val = this.inputBox._value || '';
-    const cursor = this.inputBox._cursorVisible ? '█' : ' ';
+    const val = this.inputBox._value || "";
+    const cursor = this.inputBox._cursorVisible ? "█" : " ";
     this.inputBox.setContent(val + cursor);
   }
 
@@ -280,17 +283,17 @@ export class BlessedInteractive {
     this.inputBox = WidgetFactory.createInputElement({
       bottom: 2,
       left: 0,
-      width: '100%',
+      width: "100%",
       height: 1,
-      content: '',
+      content: "",
       style: {
-        fg: 'white',
-        bg: 'blue'
-      }
+        fg: "white",
+        bg: "blue",
+      },
     });
 
     // Store the current value and add cursor support
-    this.inputBox._value = '';
+    this.inputBox._value = "";
     this.inputBox._cursorVisible = true;
     this.inputBox.getValue = () => this.inputBox._value;
     this.inputBox.setValue = (val) => {
@@ -306,21 +309,21 @@ export class BlessedInteractive {
     this._startCursorBlink();
 
     // Keep input box always focused - click anywhere should maintain focus
-    this.screen.on('element click', () => {
+    this.screen.on("element click", () => {
       if (this.inputBox && !this.inputBox.detached) {
         this.inputBox.focus();
       }
     });
 
     // Handle character input manually
-    this.inputBox.on('keypress', (ch, key) => {
+    this.inputBox.on("keypress", (ch, key) => {
       if (!key) return;
 
-      if (key.name === 'enter' || key.name === 'return') {
+      if (key.name === "enter" || key.name === "return") {
         // Submit
         const value = this.inputBox.getValue();
         this.handleSubmit(value);
-      } else if (key.name === 'backspace') {
+      } else if (key.name === "backspace") {
         // Delete last character
         const current = this.inputBox.getValue();
         this.inputBox.setValue(current.slice(0, -1));
@@ -334,25 +337,25 @@ export class BlessedInteractive {
     });
 
     // Attach event handlers
-    this.inputBox.key(['C-c'], () => {
+    this.inputBox.key(["C-c"], () => {
       this.shutdown();
     });
 
-    this.inputBox.key(['up'], () => {
+    this.inputBox.key(["up"], () => {
       if (this.historyIndex > 0) {
         this.historyIndex--;
-        this.inputBox.setValue(this.commandHistory[this.historyIndex] || '');
+        this.inputBox.setValue(this.commandHistory[this.historyIndex] || "");
         this.screen.render();
       }
     });
 
-    this.inputBox.key(['down'], () => {
+    this.inputBox.key(["down"], () => {
       if (this.historyIndex < this.commandHistory.length - 1) {
         this.historyIndex++;
-        this.inputBox.setValue(this.commandHistory[this.historyIndex] || '');
+        this.inputBox.setValue(this.commandHistory[this.historyIndex] || "");
       } else {
         this.historyIndex = this.commandHistory.length;
-        this.inputBox.setValue('');
+        this.inputBox.setValue("");
       }
       this.screen.render();
     });
@@ -373,18 +376,18 @@ export class BlessedInteractive {
     this.orchestrationBox = WidgetFactory.createScrollableLog({
       top: 0,
       left: 0,
-      width: '100%',
+      width: "100%",
       height: orchestrationHeight,
-      label: ' Orchestration Log ',
+      label: " Orchestration Log ",
       border: {
-        type: 'line'
+        type: "line",
       },
       style: {
-        fg: 'white',
+        fg: "white",
         border: {
-          fg: 'cyan'
-        }
-      }
+          fg: "cyan",
+        },
+      },
     });
     this.screen.append(this.orchestrationBox);
 
@@ -419,14 +422,14 @@ export class BlessedInteractive {
         height: adjustedHeight,
         label: ` ${agent.displayName || agent.id} `,
         border: {
-          type: 'line'
+          type: "line",
         },
         style: {
-          fg: 'white',
+          fg: "white",
           border: {
-            fg: agent.color || 'white'
-          }
-        }
+            fg: agent.color || "white",
+          },
+        },
       });
 
       this.agentPanes.set(agent.id, agentBox);
@@ -457,25 +460,32 @@ export class BlessedInteractive {
    */
   getStatusText() {
     const config = this.sessionManager.getConfig();
-    const ownerInfo = config.owner && config.owner.length > 0
-      ? ` | Owner: ${config.owner.join(', ')}`
-      : '';
-    const blessedStatus = config.blessed ? 'Interactive UI' : 'Terminal mode';
-    return `Consensus: ${config.consensus} | Rounds: ${config.maxRounds} | Mode: ${blessedStatus}${ownerInfo} | /help for commands`;
+    const ownerInfo =
+      config.owner && config.owner.length > 0
+        ? ` | 👑 Owner: ${config.owner.join(", ")}`
+        : "";
+    const blessedStatus = config.blessed
+      ? "🖥️ Interactive UI"
+      : "📟 Terminal mode";
+    return `📁 ${process.cwd()} | ⚖️ Consensus: ${config.consensus} | 🔄 Rounds: ${config.maxRounds} | ${blessedStatus}${ownerInfo} | /help for commands`;
   }
 
   /**
    * Show welcome message
    */
   showWelcome() {
-    this.outputBox.log('{cyan-fg}Welcome to Excalibur Interactive Mode!{/cyan-fg}');
-    this.outputBox.log('');
-    this.outputBox.log('Type your question to start orchestration');
-    this.outputBox.log('Type {bold}/help{/bold} to see available commands');
-    this.outputBox.log('Type {bold}/config{/bold} to view/modify settings');
-    this.outputBox.log('');
-    this.outputBox.log('{gray-fg}Tip: Press TAB for auto-completion, "/" for commands, ESC to kill agents{/gray-fg}');
-    this.outputBox.log('');
+    this.outputBox.log(
+      "{cyan-fg}Welcome to Excalibur Interactive Mode!{/cyan-fg}",
+    );
+    this.outputBox.log("");
+    this.outputBox.log("Type your question to start orchestration");
+    this.outputBox.log("Type {bold}/help{/bold} to see available commands");
+    this.outputBox.log("Type {bold}/config{/bold} to view/modify settings");
+    this.outputBox.log("");
+    this.outputBox.log(
+      '{gray-fg}Tip: Press TAB for auto-completion, "/" for commands, ESC to kill agents{/gray-fg}',
+    );
+    this.outputBox.log("");
     this.updatePrompt();
   }
 
@@ -483,7 +493,7 @@ export class BlessedInteractive {
    * Update input prompt
    */
   updatePrompt() {
-    this.inputBox.setValue('');
+    this.inputBox.setValue("");
     this.screen.render();
   }
 
@@ -498,7 +508,7 @@ export class BlessedInteractive {
     }
 
     // Live command filtering as user types
-    let previousValue = '';
+    let previousValue = "";
     this.filterInterval = setInterval(() => {
       if (this.screen.focused === this.inputBox) {
         const currentValue = this.inputBox.getValue();
@@ -539,7 +549,7 @@ export class BlessedInteractive {
     // Resize orchestration box
     if (this.orchestrationBox) {
       this.orchestrationBox.height = orchestrationHeight;
-      this.orchestrationBox.width = '100%';
+      this.orchestrationBox.width = "100%";
     }
 
     // Recalculate grid layout
@@ -575,24 +585,24 @@ export class BlessedInteractive {
    */
   setupKeyBindings() {
     // Handle terminal resize
-    this.screen.on('resize', () => {
+    this.screen.on("resize", () => {
       this.handleResize();
     });
 
     // Ctrl+C to exit
-    this.screen.key(['C-c'], () => {
+    this.screen.key(["C-c"], () => {
       this.shutdown();
     });
 
     // Ctrl+L to clear output
-    this.screen.key(['C-l'], () => {
-      this.outputBox.setContent('');
+    this.screen.key(["C-l"], () => {
+      this.outputBox.setContent("");
       this.showWelcome();
       this.screen.render();
     });
 
     // ESC to kill all running agents and refocus input
-    this.screen.key(['escape'], () => {
+    this.screen.key(["escape"], () => {
       this.killAllAgents();
       // Refocus input box after killing agents
       setTimeout(() => {
@@ -608,31 +618,40 @@ export class BlessedInteractive {
     this._setupCommandFilter();
 
     // Tab for autocomplete at screen level (to override default behavior)
-    this.screen.key(['tab'], () => {
+    this.screen.key(["tab"], () => {
       const input = this.inputBox.getValue();
 
       // If empty or just "/", insert "/"
-      if (!input || input === '') {
-        this.inputBox.setValue('/');
+      if (!input || input === "") {
+        this.inputBox.setValue("/");
         this.screen.render();
         return;
       }
 
-      if (input.startsWith('/')) {
-        const commands = ['/help', '/question', '/chat', '/config', '/agents', '/history', '/clear', '/exit'];
-        const matches = commands.filter(cmd => cmd.startsWith(input));
+      if (input.startsWith("/")) {
+        const commands = [
+          "/help",
+          "/question",
+          "/chat",
+          "/config",
+          "/agents",
+          "/history",
+          "/clear",
+          "/exit",
+        ];
+        const matches = commands.filter((cmd) => cmd.startsWith(input));
 
         if (matches.length === 1) {
           // Single match - autocomplete it
-          this.inputBox.setValue(matches[0] + ' ');
+          this.inputBox.setValue(matches[0] + " ");
           this.screen.render();
         } else if (matches.length > 1) {
           // Multiple matches - show them
           this.outputBox.log(`{cyan-fg}💡 Matching commands:{/cyan-fg}`);
-          matches.forEach(m => {
+          matches.forEach((m) => {
             this.outputBox.log(`  {bold}${m}{/bold}`);
           });
-          this.outputBox.log('');
+          this.outputBox.log("");
           this.screen.render();
         }
       }
@@ -650,7 +669,7 @@ export class BlessedInteractive {
     this.isSubmitting = true;
 
     try {
-      const input = (value || '').trim();
+      const input = (value || "").trim();
 
       // Always hide dropdown on submit
       this.hideCommandDropdown();
@@ -660,34 +679,43 @@ export class BlessedInteractive {
         return;
       }
 
-    // Special case: if input is just "/", show all commands
-    if (input === '/') {
-      this.outputBox.log(`{bold}{green-fg}Excalibur>{/green-fg}{/bold} ${input}`);
-      this.outputBox.log('');
-      this.showHelp();
-      this.updatePrompt();
-      this.inputBox.focus();
-      return;
-    }
+      // Special case: if input is just "/", show all commands
+      if (input === "/") {
+        this.outputBox.log(
+          `{bold}{green-fg}Excalibur>{/green-fg}{/bold} ${input}`,
+        );
+        this.outputBox.log("");
+        this.showHelp();
+        this.updatePrompt();
+        this.inputBox.focus();
+        return;
+      }
 
-    // If input starts with "/" but is not a valid command, show suggestions
-    if (input.startsWith('/') && !this.isValidCommand(input.split(/\s+/)[0])) {
-      const partialCommand = input.split(/\s+/)[0];
-      this.outputBox.log(`{bold}{green-fg}Excalibur>{/green-fg}{/bold} ${input}`);
-      this.outputBox.log('');
-      this.showCommandSuggestions(partialCommand);
-      this.updatePrompt();
-      this.inputBox.focus();
-      return;
-    }
+      // If input starts with "/" but is not a valid command, show suggestions
+      if (
+        input.startsWith("/") &&
+        !this.isValidCommand(input.split(/\s+/)[0])
+      ) {
+        const partialCommand = input.split(/\s+/)[0];
+        this.outputBox.log(
+          `{bold}{green-fg}Excalibur>{/green-fg}{/bold} ${input}`,
+        );
+        this.outputBox.log("");
+        this.showCommandSuggestions(partialCommand);
+        this.updatePrompt();
+        this.inputBox.focus();
+        return;
+      }
 
       // Add to history
       this.commandHistory.push(input);
       this.historyIndex = this.commandHistory.length;
 
       // Echo command
-      this.outputBox.log(`{bold}{green-fg}Excalibur>{/green-fg}{/bold} ${input}`);
-      this.outputBox.log('');
+      this.outputBox.log(
+        `{bold}{green-fg}Excalibur>{/green-fg}{/bold} ${input}`,
+      );
+      this.outputBox.log("");
 
       // Handle command
       await this.handleInput(input);
@@ -704,7 +732,7 @@ export class BlessedInteractive {
    */
   async handleInput(input) {
     // Parse command
-    if (input.startsWith('/')) {
+    if (input.startsWith("/")) {
       await this.handleCommand(input);
     } else {
       // It's a question for orchestration
@@ -721,69 +749,88 @@ export class BlessedInteractive {
     const args = parts.slice(1);
 
     switch (command) {
-      case '/help':
+      case "/help":
         this.showHelp();
         break;
 
-      case '/question':
+      case "/question":
         if (args.length === 0) {
-          this.outputBox.log('{red-fg}Usage: /question <your question>{/red-fg}');
+          this.outputBox.log(
+            "{red-fg}Usage: /question <your question>{/red-fg}",
+          );
         } else {
-          await this.handleQuestion(args.join(' '));
+          await this.handleQuestion(args.join(" "));
         }
         break;
 
-      case '/config':
+      case "/config":
         if (args.length === 0) {
           this.showConfig();
         } else if (args.length === 2) {
           this.updateConfig(args[0], args[1]);
         } else {
-          this.outputBox.log('{red-fg}Usage: /config [key value]{/red-fg}');
+          this.outputBox.log("{red-fg}Usage: /config [key value]{/red-fg}");
         }
         break;
 
-      case '/agents':
+      case "/agents":
         this.showAgents();
         break;
 
-      case '/chat':
+      case "/chat":
         if (args.length === 0) {
-          this.outputBox.log('{red-fg}Usage: /chat <agent1> [agent2] ... or "all"{/red-fg}');
-          this.outputBox.log('Example: {bold}/chat claude{/bold} - Chat with Claude only');
-          this.outputBox.log('Example: {bold}/chat claude gemini{/bold} - Chat with Claude and Gemini');
-          this.outputBox.log('Example: {bold}/chat all{/bold} - Use all agents (orchestration mode)');
+          this.outputBox.log(
+            '{red-fg}Usage: /chat <agent1> [agent2] ... or "all"{/red-fg}',
+          );
+          this.outputBox.log(
+            "Example: {bold}/chat claude{/bold} - Chat with Claude only",
+          );
+          this.outputBox.log(
+            "Example: {bold}/chat claude gemini{/bold} - Chat with Claude and Gemini",
+          );
+          this.outputBox.log(
+            "Example: {bold}/chat all{/bold} - Use all agents (orchestration mode)",
+          );
         } else {
           await this.selectAgentsForChat(args);
         }
         break;
 
-      case '/history':
+      case "/history":
         this.showHistory();
         break;
 
-      case '/clear':
-        this.outputBox.setContent('');
+      case "/clear":
+        this.outputBox.setContent("");
         this.showWelcome();
         break;
 
-      case '/exit':
+      case "/exit":
         this.shutdown();
         break;
 
       default:
         this.outputBox.log(`{red-fg}Unknown command: ${command}{/red-fg}`);
-        this.outputBox.log('Type {bold}/help{/bold} for available commands');
+        this.outputBox.log("Type {bold}/help{/bold} for available commands");
     }
 
-    this.outputBox.log('');
+    this.outputBox.log("");
   }
 
   /**
    * Check if a command is valid
    */
   isValidCommand(cmd) {
-    const validCommands = ['/help', '/question', '/chat', '/config', '/agents', '/history', '/clear', '/exit'];
+    const validCommands = [
+      "/help",
+      "/question",
+      "/chat",
+      "/config",
+      "/agents",
+      "/history",
+      "/clear",
+      "/exit",
+    ];
     return validCommands.includes(cmd);
   }
 
@@ -792,28 +839,28 @@ export class BlessedInteractive {
    */
   showCommandSuggestions(partialCommand) {
     const commands = [
-      { cmd: '/help', desc: 'Show this help' },
-      { cmd: '/question', desc: 'Ask a question to agents' },
-      { cmd: '/chat', desc: 'Chat with specific agents' },
-      { cmd: '/config', desc: 'Show/modify configuration' },
-      { cmd: '/agents', desc: 'List available agents' },
-      { cmd: '/history', desc: 'Show command history' },
-      { cmd: '/clear', desc: 'Clear screen' },
-      { cmd: '/exit', desc: 'Exit interactive mode' }
+      { cmd: "/help", desc: "Show this help" },
+      { cmd: "/question", desc: "Ask a question to agents" },
+      { cmd: "/chat", desc: "Chat with specific agents" },
+      { cmd: "/config", desc: "Show/modify configuration" },
+      { cmd: "/agents", desc: "List available agents" },
+      { cmd: "/history", desc: "Show command history" },
+      { cmd: "/clear", desc: "Clear screen" },
+      { cmd: "/exit", desc: "Exit interactive mode" },
     ];
 
-    const matches = commands.filter(c => c.cmd.startsWith(partialCommand));
+    const matches = commands.filter((c) => c.cmd.startsWith(partialCommand));
 
     if (matches.length > 0) {
-      this.outputBox.log('{cyan-fg}💡 Did you mean:{/cyan-fg}');
-      matches.forEach(m => {
+      this.outputBox.log("{cyan-fg}💡 Did you mean:{/cyan-fg}");
+      matches.forEach((m) => {
         this.outputBox.log(`  {bold}${m.cmd}{/bold} - ${m.desc}`);
       });
     } else {
       this.outputBox.log(`{red-fg}Unknown command: ${partialCommand}{/red-fg}`);
-      this.outputBox.log('Type {bold}/help{/bold} for all available commands');
+      this.outputBox.log("Type {bold}/help{/bold} for all available commands");
     }
-    this.outputBox.log('');
+    this.outputBox.log("");
   }
 
   /**
@@ -821,27 +868,27 @@ export class BlessedInteractive {
    */
   showLiveCommandFilter(input) {
     // Don't show if input doesn't start with "/"
-    if (!input || !input.startsWith('/')) {
+    if (!input || !input.startsWith("/")) {
       this.hideCommandDropdown();
       return;
     }
 
     const commands = [
-      { cmd: '/help', desc: 'Show this help' },
-      { cmd: '/question', desc: 'Ask a question to agents' },
-      { cmd: '/chat', desc: 'Chat with specific agents' },
-      { cmd: '/config', desc: 'Show/modify configuration' },
-      { cmd: '/agents', desc: 'List available agents' },
-      { cmd: '/history', desc: 'Show command history' },
-      { cmd: '/clear', desc: 'Clear screen' },
-      { cmd: '/exit', desc: 'Exit interactive mode' }
+      { cmd: "/help", desc: "Show this help" },
+      { cmd: "/question", desc: "Ask a question to agents" },
+      { cmd: "/chat", desc: "Chat with specific agents" },
+      { cmd: "/config", desc: "Show/modify configuration" },
+      { cmd: "/agents", desc: "List available agents" },
+      { cmd: "/history", desc: "Show command history" },
+      { cmd: "/clear", desc: "Clear screen" },
+      { cmd: "/exit", desc: "Exit interactive mode" },
     ];
 
     const partialCommand = input.split(/\s+/)[0];
-    const matches = commands.filter(c => c.cmd.startsWith(partialCommand));
+    const matches = commands.filter((c) => c.cmd.startsWith(partialCommand));
 
     // Show dropdown if we have matches and input is partial (not exact match)
-    if (matches.length > 0 && !matches.some(m => m.cmd === partialCommand)) {
+    if (matches.length > 0 && !matches.some((m) => m.cmd === partialCommand)) {
       this.showCommandDropdown(matches);
     } else {
       this.hideCommandDropdown();
@@ -860,22 +907,22 @@ export class BlessedInteractive {
     this.commandDropdown = WidgetFactory.createBox({
       top: this.inputBox.top - height,
       left: 0,
-      width: '50%',
+      width: "50%",
       height: height,
       border: {
-        type: 'line'
+        type: "line",
       },
       style: {
-        fg: 'white',
+        fg: "white",
         border: {
-          fg: 'cyan'
-        }
+          fg: "cyan",
+        },
       },
-      label: ' 💡 Commands '
+      label: " 💡 Commands ",
     });
 
     // Add command items
-    let content = '';
+    let content = "";
     matches.forEach((match, idx) => {
       content += `{cyan-fg}${match.cmd}{/cyan-fg} - {gray-fg}${match.desc}{/gray-fg}\n`;
     });
@@ -901,23 +948,47 @@ export class BlessedInteractive {
    * Show help
    */
   showHelp() {
-    this.outputBox.log('{bold}{cyan-fg}Available Commands:{/cyan-fg}{/bold}');
-    this.outputBox.log('');
-    this.outputBox.log('  {bold}/help{/bold}                    - Show this help');
-    this.outputBox.log('  {bold}/question <text>{/bold}         - Ask a question to agents');
-    this.outputBox.log('  {bold}/chat <agents>{/bold}           - Chat with specific agents (e.g., /chat claude gemini)');
-    this.outputBox.log('  {bold}/chat all{/bold}                - Return to orchestration mode (all agents)');
-    this.outputBox.log('  {bold}/config{/bold}                  - Show configuration');
-    this.outputBox.log('  {bold}/config <key> <value>{/bold}   - Set configuration');
-    this.outputBox.log('  {bold}/agents{/bold}                  - List available agents');
-    this.outputBox.log('  {bold}/history{/bold}                 - Show command history');
-    this.outputBox.log('  {bold}/clear{/bold}                   - Clear screen');
-    this.outputBox.log('  {bold}/exit{/bold}                    - Exit interactive mode');
-    this.outputBox.log('');
-    this.outputBox.log('{bold}Config Keys:{/bold}');
-    this.outputBox.log('  consensus, maxRounds, blessed, preset, unanimousPct,');
-    this.outputBox.log('  superMajorityPct, majorityPct, allowBlockers, rubberPenalty,');
-    this.outputBox.log('  owner, ownerMin, ownerMode');
+    this.outputBox.log("{bold}{cyan-fg}Available Commands:{/cyan-fg}{/bold}");
+    this.outputBox.log("");
+    this.outputBox.log(
+      "  {bold}/help{/bold}                    - Show this help",
+    );
+    this.outputBox.log(
+      "  {bold}/question <text>{/bold}         - Ask a question to agents",
+    );
+    this.outputBox.log(
+      "  {bold}/chat <agents>{/bold}           - Chat with specific agents (e.g., /chat claude gemini)",
+    );
+    this.outputBox.log(
+      "  {bold}/chat all{/bold}                - Return to orchestration mode (all agents)",
+    );
+    this.outputBox.log(
+      "  {bold}/config{/bold}                  - Show configuration",
+    );
+    this.outputBox.log(
+      "  {bold}/config <key> <value>{/bold}   - Set configuration",
+    );
+    this.outputBox.log(
+      "  {bold}/agents{/bold}                  - List available agents",
+    );
+    this.outputBox.log(
+      "  {bold}/history{/bold}                 - Show command history",
+    );
+    this.outputBox.log(
+      "  {bold}/clear{/bold}                   - Clear screen",
+    );
+    this.outputBox.log(
+      "  {bold}/exit{/bold}                    - Exit interactive mode",
+    );
+    this.outputBox.log("");
+    this.outputBox.log("{bold}Config Keys:{/bold}");
+    this.outputBox.log(
+      "  consensus, maxRounds, blessed, preset, unanimousPct,",
+    );
+    this.outputBox.log(
+      "  superMajorityPct, majorityPct, allowBlockers, rubberPenalty,",
+    );
+    this.outputBox.log("  owner, ownerMin, ownerMode");
   }
 
   /**
@@ -925,10 +996,12 @@ export class BlessedInteractive {
    */
   showConfig() {
     const config = this.sessionManager.getConfig();
-    this.outputBox.log('{bold}{cyan-fg}Current Configuration:{/cyan-fg}{/bold}');
-    this.outputBox.log('');
+    this.outputBox.log(
+      "{bold}{cyan-fg}Current Configuration:{/cyan-fg}{/bold}",
+    );
+    this.outputBox.log("");
     for (const [key, value] of Object.entries(config)) {
-      const valueStr = Array.isArray(value) ? value.join(',') : String(value);
+      const valueStr = Array.isArray(value) ? value.join(",") : String(value);
       this.outputBox.log(`  {bold}${key}:{/bold} ${valueStr}`);
     }
     this.statusBar.setContent(this.getStatusText());
@@ -940,10 +1013,10 @@ export class BlessedInteractive {
   updateConfig(key, value) {
     // Parse value
     let parsedValue = value;
-    if (value === 'true') parsedValue = true;
-    else if (value === 'false') parsedValue = false;
+    if (value === "true") parsedValue = true;
+    else if (value === "false") parsedValue = false;
     else if (!isNaN(value)) parsedValue = Number(value);
-    else if (value.includes(',')) parsedValue = value.split(',');
+    else if (value.includes(",")) parsedValue = value.split(",");
 
     if (this.sessionManager.updateConfig(key, parsedValue)) {
       this.outputBox.log(`{green-fg}✓ Set ${key} = ${value}{/green-fg}`);
@@ -958,10 +1031,12 @@ export class BlessedInteractive {
    */
   showAgents() {
     const agents = this.sessionManager.getAgents();
-    this.outputBox.log('{bold}{cyan-fg}Available Agents:{/cyan-fg}{/bold}');
-    this.outputBox.log('');
+    this.outputBox.log("{bold}{cyan-fg}Available Agents:{/cyan-fg}{/bold}");
+    this.outputBox.log("");
     for (const agent of agents) {
-      this.outputBox.log(`  ${agent.avatar || '🤖'} {bold}${agent.displayName || agent.id}{/bold}`);
+      this.outputBox.log(
+        `  ${agent.avatar || "🤖"} {bold}${agent.displayName || agent.id}{/bold}`,
+      );
       this.outputBox.log(`     Command: ${agent.cmd}`);
     }
   }
@@ -971,13 +1046,16 @@ export class BlessedInteractive {
    */
   showHistory() {
     const history = this.sessionManager.getHistory();
-    this.outputBox.log('{bold}{cyan-fg}Command History:{/cyan-fg}{/bold}');
-    this.outputBox.log('');
+    this.outputBox.log("{bold}{cyan-fg}Command History:{/cyan-fg}{/bold}");
+    this.outputBox.log("");
     if (history.length === 0) {
-      this.outputBox.log('  {gray-fg}No history yet{/gray-fg}');
+      this.outputBox.log("  {gray-fg}No history yet{/gray-fg}");
     } else {
       for (const entry of history.slice(-10)) {
-        const status = entry.result === 'success' ? '{green-fg}✓{/green-fg}' : '{red-fg}✗{/red-fg}';
+        const status =
+          entry.result === "success"
+            ? "{green-fg}✓{/green-fg}"
+            : "{red-fg}✗{/red-fg}";
         this.outputBox.log(`  ${status} ${entry.command}`);
       }
     }
@@ -989,11 +1067,13 @@ export class BlessedInteractive {
   async selectAgentsForChat(agentNames) {
     const allAgents = this.sessionManager.getAgents();
 
-    if (agentNames.length === 1 && agentNames[0].toLowerCase() === 'all') {
+    if (agentNames.length === 1 && agentNames[0].toLowerCase() === "all") {
       // Use all agents - full orchestration mode
       this.selectedAgents = [];
-      this.outputBox.log('{green-fg}✓ Using all agents (orchestration mode){/green-fg}');
-      this.outputBox.log('');
+      this.outputBox.log(
+        "{green-fg}✓ Using all agents (orchestration mode){/green-fg}",
+      );
+      this.outputBox.log("");
       return;
     }
 
@@ -1002,9 +1082,10 @@ export class BlessedInteractive {
     const notFound = [];
 
     for (const name of agentNames) {
-      const agent = allAgents.find(a =>
-        a.id.toLowerCase() === name.toLowerCase() ||
-        a.displayName.toLowerCase().includes(name.toLowerCase())
+      const agent = allAgents.find(
+        (a) =>
+          a.id.toLowerCase() === name.toLowerCase() ||
+          a.displayName.toLowerCase().includes(name.toLowerCase()),
       );
       if (agent) {
         selected.push(agent);
@@ -1014,22 +1095,32 @@ export class BlessedInteractive {
     }
 
     if (notFound.length > 0) {
-      this.outputBox.log(`{yellow-fg}⚠️  Agent(s) not found: ${notFound.join(', ')}{/yellow-fg}`);
+      this.outputBox.log(
+        `{yellow-fg}⚠️  Agent(s) not found: ${notFound.join(", ")}{/yellow-fg}`,
+      );
     }
 
     if (selected.length === 0) {
-      this.outputBox.log('{red-fg}✗ No valid agents selected{/red-fg}');
-      this.outputBox.log('');
+      this.outputBox.log("{red-fg}✗ No valid agents selected{/red-fg}");
+      this.outputBox.log("");
       return;
     }
 
     this.selectedAgents = selected;
 
-    const agentList = selected.map(a => `${a.avatar || '🤖'} ${a.displayName || a.id}`).join(', ');
-    this.outputBox.log(`{green-fg}✓ Chat mode activated with: ${agentList}{/green-fg}`);
-    this.outputBox.log('{gray-fg}Your messages will be sent directly to these agents without orchestration.{/gray-fg}');
-    this.outputBox.log('{gray-fg}Use {bold}/chat all{/bold} to return to orchestration mode.{/gray-fg}');
-    this.outputBox.log('');
+    const agentList = selected
+      .map((a) => `${a.avatar || "🤖"} ${a.displayName || a.id}`)
+      .join(", ");
+    this.outputBox.log(
+      `{green-fg}✓ Chat mode activated with: ${agentList}{/green-fg}`,
+    );
+    this.outputBox.log(
+      "{gray-fg}Your messages will be sent directly to these agents without orchestration.{/gray-fg}",
+    );
+    this.outputBox.log(
+      "{gray-fg}Use {bold}/chat all{/bold} to return to orchestration mode.{/gray-fg}",
+    );
+    this.outputBox.log("");
   }
 
   /**
@@ -1040,7 +1131,7 @@ export class BlessedInteractive {
    * @returns {Promise<string>} - Full output from agent
    */
   async _spawnAgentProcess(agent, prompt) {
-    let buffer = '';
+    let buffer = "";
 
     // Use shared spawn utility with streaming callback
     const result = await spawnAgentProcess(agent, prompt, {
@@ -1048,7 +1139,7 @@ export class BlessedInteractive {
         buffer += text;
 
         // Display complete lines only
-        const lines = buffer.split('\n');
+        const lines = buffer.split("\n");
         if (lines.length > 1) {
           // Last item is incomplete line, keep it
           buffer = lines.pop();
@@ -1061,7 +1152,7 @@ export class BlessedInteractive {
           }
         }
       },
-      processTracker: this.activeProcesses
+      processTracker: this.activeProcesses,
     });
 
     // Display any remaining buffer
@@ -1091,23 +1182,34 @@ export class BlessedInteractive {
     // Send to each selected agent
     for (const agent of this.selectedAgents) {
       try {
-        this.outputBox.log(`{cyan-fg}${agent.avatar || '🤖'} ${agent.displayName || agent.id}: Thinking...{/cyan-fg}`);
+        this.outputBox.log(
+          `{cyan-fg}${agent.avatar || "🤖"} ${agent.displayName || agent.id}: Thinking...{/cyan-fg}`,
+        );
         if (this.agentPanes.has(agent.id)) {
-          this.appendToAgentPanel(agent.id, `{cyan-fg}User: ${question}{/cyan-fg}`);
-          this.appendToAgentPanel(agent.id, '');
+          this.appendToAgentPanel(
+            agent.id,
+            `{cyan-fg}User: ${question}{/cyan-fg}`,
+          );
+          this.appendToAgentPanel(agent.id, "");
         }
 
         // Use shared spawn method (DRY principle)
         await this._spawnAgentProcess(agent, question);
 
-        this.outputBox.log(`{green-fg}${agent.avatar || '🤖'} ${agent.displayName || agent.id}: Done{/green-fg}`);
-
+        this.outputBox.log(
+          `{green-fg}${agent.avatar || "🤖"} ${agent.displayName || agent.id}: Done{/green-fg}`,
+        );
       } catch (error) {
-        this.outputBox.log(`{red-fg}✗ Error with ${agent.displayName || agent.id}: ${error.message}{/red-fg}`);
-        this.outputBox.log('');
+        this.outputBox.log(
+          `{red-fg}✗ Error with ${agent.displayName || agent.id}: ${error.message}{/red-fg}`,
+        );
+        this.outputBox.log("");
         if (this.agentPanes.has(agent.id)) {
-          this.appendToAgentPanel(agent.id, `{red-fg}Error: ${error.message}{/red-fg}`);
-          this.appendToAgentPanel(agent.id, '');
+          this.appendToAgentPanel(
+            agent.id,
+            `{red-fg}Error: ${error.message}{/red-fg}`,
+          );
+          this.appendToAgentPanel(agent.id, "");
         }
       }
     }
@@ -1125,7 +1227,9 @@ export class BlessedInteractive {
    */
   async handleQuestion(question) {
     if (!this.questionHandler) {
-      this.outputBox.log('{red-fg}Error: No question handler configured{/red-fg}');
+      this.outputBox.log(
+        "{red-fg}Error: No question handler configured{/red-fg}",
+      );
       return;
     }
 
@@ -1133,15 +1237,15 @@ export class BlessedInteractive {
     try {
       // Check if in agent chat mode
       if (this.selectedAgents.length > 0) {
-        this.outputBox.log('{cyan-fg}Sending to selected agents...{/cyan-fg}');
-        this.outputBox.log('');
+        this.outputBox.log("{cyan-fg}Sending to selected agents...{/cyan-fg}");
+        this.outputBox.log("");
         await this.sendToAgentsDirectly(question);
         return;
       }
 
       // Normal orchestration mode
-      this.outputBox.log('{cyan-fg}Starting orchestration...{/cyan-fg}');
-      this.outputBox.log('');
+      this.outputBox.log("{cyan-fg}Starting orchestration...{/cyan-fg}");
+      this.outputBox.log("");
 
       // Get config and check if blessed UI should be used
       config = this.sessionManager.getConfig();
@@ -1164,7 +1268,9 @@ export class BlessedInteractive {
         // Keep blessed UI active to catch any final logs
         // Don't switch modes yet
       } else if (!result.success) {
-        this.outputBox.log(`{red-fg}✗ Orchestration failed: ${result.error}{/red-fg}`);
+        this.outputBox.log(
+          `{red-fg}✗ Orchestration failed: ${result.error}{/red-fg}`,
+        );
         this.sessionManager.addToHistory(question, false);
       }
 
@@ -1177,29 +1283,33 @@ export class BlessedInteractive {
 
       // Display final answer in the fresh output box
       if (result.success && result.finalAnswer) {
-        this.outputBox.log('');
-        this.outputBox.log('{cyan-fg}' + '═'.repeat(60) + '{/cyan-fg}');
-        this.outputBox.log('{bold}{green-fg}===== FINAL ANSWER ====={/green-fg}{/bold}');
-        this.outputBox.log('{cyan-fg}' + '═'.repeat(60) + '{/cyan-fg}');
-        this.outputBox.log('');
+        this.outputBox.log("");
+        this.outputBox.log("{cyan-fg}" + "═".repeat(60) + "{/cyan-fg}");
+        this.outputBox.log(
+          "{bold}{green-fg}===== FINAL ANSWER ====={/green-fg}{/bold}",
+        );
+        this.outputBox.log("{cyan-fg}" + "═".repeat(60) + "{/cyan-fg}");
+        this.outputBox.log("");
         // Display final answer (blessed tags already in the text)
-        const lines = result.finalAnswer.split('\n');
+        const lines = result.finalAnswer.split("\n");
         for (const line of lines) {
           this.outputBox.log(line);
         }
-        this.outputBox.log('');
-        this.outputBox.log('{cyan-fg}' + '═'.repeat(60) + '{/cyan-fg}');
-        this.outputBox.log('');
+        this.outputBox.log("");
+        this.outputBox.log("{cyan-fg}" + "═".repeat(60) + "{/cyan-fg}");
+        this.outputBox.log("");
         this.sessionManager.addToHistory(question, true);
       }
-
     } catch (error) {
       // Ensure we switch back to interactive mode on error
       if (config && config.blessed) {
         try {
           await this.switchToInteractiveMode();
         } catch (switchError) {
-          console.error('Error switching back to interactive mode:', switchError);
+          console.error(
+            "Error switching back to interactive mode:",
+            switchError,
+          );
         }
       }
 
@@ -1214,7 +1324,7 @@ export class BlessedInteractive {
 
     // Only log if outputBox exists
     if (this.outputBox) {
-      this.outputBox.log('');
+      this.outputBox.log("");
     }
   }
 
@@ -1254,7 +1364,7 @@ export class BlessedInteractive {
   async _destroyOrchestrationPanels() {
     // Wait for any pending setImmediate callbacks from blessed.log widgets
     if (this.orchestrationBox || this.agentPanes.size > 0) {
-      await new Promise(resolve => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
     }
 
     // Destroy orchestration box
@@ -1374,7 +1484,7 @@ export class BlessedInteractive {
 
     // Wait for outputBox's pending setImmediate callbacks to complete
     // This is necessary because blessed.log uses setImmediate internally
-    await new Promise(resolve => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
 
     // Update state
     this.currentMode = this.UI_MODES.INTERACTIVE;
@@ -1398,7 +1508,7 @@ export class BlessedInteractive {
     this.screen.append(this.inputBox);
 
     // Clear outputBox content for fresh start
-    this.outputBox.setContent('');
+    this.outputBox.setContent("");
 
     // Show welcome message
     this.showWelcome();
@@ -1464,7 +1574,7 @@ export class BlessedInteractive {
       // Use built-in log() method
       pane.log(text);
       // Add extra line break for better readability
-      pane.log('');
+      pane.log("");
       // Only auto-scroll during active orchestration to avoid fighting user input
       if (this.orchestrationActive) {
         pane.setScrollPerc(100);
@@ -1485,24 +1595,24 @@ export class BlessedInteractive {
     // Check if pane still has valid parent (not detached)
     if (!pane.parent || pane.detached) return;
 
-    const agent = this.sessionManager.getAgents().find(a => a.id === agentId);
+    const agent = this.sessionManager.getAgents().find((a) => a.id === agentId);
     const displayName = agent?.displayName || agentId;
 
-    let statusSymbol = '';
-    let borderColor = agent?.color || 'white';
+    let statusSymbol = "";
+    let borderColor = agent?.color || "white";
 
     switch (status) {
-      case 'running':
-        statusSymbol = '[...]';
-        borderColor = 'yellow';
+      case "running":
+        statusSymbol = "[...]";
+        borderColor = "yellow";
         break;
-      case 'completed':
-        statusSymbol = '[✓]';
-        borderColor = 'green';
+      case "completed":
+        statusSymbol = "[✓]";
+        borderColor = "green";
         break;
-      case 'failed':
-        statusSymbol = '[✗]';
-        borderColor = 'red';
+      case "failed":
+        statusSymbol = "[✗]";
+        borderColor = "red";
         break;
     }
 
@@ -1530,31 +1640,34 @@ export class BlessedInteractive {
     const activeProcesses = global.activeProcesses || new Set();
 
     if (activeProcesses.size === 0) {
-      this.outputBox.log('{yellow-fg}No active agents to kill.{/yellow-fg}');
-      this.outputBox.log('');
+      this.outputBox.log("{yellow-fg}No active agents to kill.{/yellow-fg}");
+      this.outputBox.log("");
       return;
     }
 
     const processCount = activeProcesses.size;
-    this.outputBox.log(`{red-fg}🛑 Killing ${processCount} active agent${processCount > 1 ? 's' : ''}...{/red-fg}`);
+    this.outputBox.log(
+      `{red-fg}🛑 Killing ${processCount} active agent${processCount > 1 ? "s" : ""}...{/red-fg}`,
+    );
 
     // Kill all active child processes more aggressively
     for (const child of activeProcesses) {
       if (!child.killed) {
         try {
           // First try SIGTERM
-          child.kill('SIGTERM');
+          child.kill("SIGTERM");
 
           // Immediately follow up with SIGKILL for more reliable termination
           setTimeout(() => {
             if (!child.killed) {
-              child.kill('SIGKILL');
+              child.kill("SIGKILL");
             }
           }, 100); // Reduced timeout to 100ms for faster termination
-
         } catch (error) {
           // Process might already be dead, ignore errors
-          this.outputBox.log(`{red-fg}Failed to kill process: ${error.message}{/red-fg}`);
+          this.outputBox.log(
+            `{red-fg}Failed to kill process: ${error.message}{/red-fg}`,
+          );
         }
       }
     }
@@ -1565,8 +1678,8 @@ export class BlessedInteractive {
     // Set interruption flag
     global.orchestrationInterrupted = true;
 
-    this.outputBox.log('{green-fg}✓ All agents killed{/green-fg}');
-    this.outputBox.log('');
+    this.outputBox.log("{green-fg}✓ All agents killed{/green-fg}");
+    this.outputBox.log("");
   }
 
   /**
@@ -1586,7 +1699,7 @@ export class BlessedInteractive {
     if (this.activeProcesses) {
       for (const [agentId, proc] of this.activeProcesses.entries()) {
         try {
-          proc.kill('SIGTERM');
+          proc.kill("SIGTERM");
         } catch (err) {
           // Ignore errors during cleanup
         }
