@@ -123,22 +123,19 @@ async function runOrchestration(question, options) {
 
 - Use descriptive error messages
 - Handle process signals for graceful shutdown (SIGINT, SIGTERM)
-- Track active processes in a Set for cleanup
+- Use ProcessManager for tracking active processes
 - Use custom error constants for specific error types
 
 ```javascript
+import { getProcessManager } from './process-manager.js';
+
 const INTERRUPTION_ERROR = 'Interrupted by user';
+const processManager = getProcessManager();
 
 // Handle graceful shutdown
-const activeProcesses = new Set();
-
 function gracefulShutdown(signal) {
   console.log(`\nReceived ${signal}. Terminating active processes...`);
-  for (const child of activeProcesses) {
-    if (!child.killed) {
-      child.kill('SIGTERM');
-    }
-  }
+  processManager.killAll('SIGTERM');
   process.exit(0);
 }
 
@@ -177,7 +174,7 @@ if (argv.includes('--help') || argv.includes('-h')) {
 When needed, attach to `global` object:
 
 ```javascript
-global.activeProcesses = activeProcesses;
+global.processManager = processManager;
 global.orchestrationInterrupted = false;
 ```
 

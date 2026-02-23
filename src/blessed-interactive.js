@@ -79,7 +79,12 @@ export class BlessedInteractive {
   constructor(options = {}) {
     this.sessionManager = options.sessionManager || new SessionManager();
     this.questionHandler = options.questionHandler || null;
-    this.logger = options.logger || null; // Store logger reference for cleanup
+    this.logger = options.logger || null;
+    this.processManager = options.processManager || null;
+
+    if (options.agents) {
+      this.sessionManager.setAgents(options.agents);
+    }
 
     this.screen = null;
     this.inputBox = null;
@@ -1132,9 +1137,6 @@ export class BlessedInteractive {
   async _spawnAgentProcess(agent, prompt) {
     let buffer = "";
 
-    // Use global activeProcesses to ensure proper tracking and cleanup
-    const processTracker = global.activeProcesses;
-
     // Use shared spawn utility with streaming callback
     const result = await spawnAgentProcess(agent, prompt, {
       onStdout: (text) => {
@@ -1154,7 +1156,7 @@ export class BlessedInteractive {
           }
         }
       },
-      processTracker,
+      processManager: this.processManager,
     });
 
     // Display any remaining buffer
@@ -1667,32 +1669,25 @@ export class BlessedInteractive {
   }
 
   /**
-   * Set question handler
-   */
-  setQuestionHandler(handler) {
-    this.questionHandler = handler;
-  }
-
-  /**
    * Kill all active agents
    */
   killAllAgents() {
-    // Access the global activeProcesses from index.js
-    const activeProcesses = global.activeProcesses || new Set();
+    // Use injected processManager
+    const processManager = this.processManager;
 
-    if (activeProcesses.size === 0) {
+    if (!processManager || processManager.size === 0) {
       this.outputBox.log("{yellow-fg}No active agents to kill.{/yellow-fg}");
       this.outputBox.log("");
       return;
     }
 
-    const processCount = activeProcesses.size;
+    const processCount = processManager.size;
     this.outputBox.log(
       `{red-fg}🛑 Killing ${processCount} active agent${processCount > 1 ? "s" : ""}...{/red-fg}`,
     );
 
     // Kill all active child processes more aggressively
-    for (const child of activeProcesses) {
+    for (const child of processManager) {
       if (!child.killed) {
         try {
           // First try SIGTERM
@@ -1714,7 +1709,7 @@ export class BlessedInteractive {
     }
 
     // Clear the set
-    activeProcesses.clear();
+    processManager.clear();
 
     // Set interruption flag
     global.orchestrationInterrupted = true;
@@ -1744,17 +1739,9 @@ export class BlessedInteractive {
       this._agentAnimations.clear();
     }
 
-    // Kill all active processes using global tracker
-    const activeProcs = global.activeProcesses;
-    if (activeProcs && activeProcs.size > 0) {
-      for (const proc of activeProcs) {
-        try {
-          proc.kill("SIGTERM");
-        } catch (err) {
-          // Ignore errors during cleanup
-        }
-      }
-      activeProcs.clear();
+    // Kill all active processes using injected processManager
+    if (this.processManager) {
+      this.processManager.killAll('SIGTERM');
     }
 
     // Destroy screen (which destroys all children including panels)

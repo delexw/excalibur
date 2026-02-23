@@ -6,6 +6,7 @@
  */
 
 import { spawn } from 'node:child_process';
+import { ProcessManager } from './process-manager.js';
 
 /**
  * Spawn agent process and collect output
@@ -16,7 +17,7 @@ import { spawn } from 'node:child_process';
  * @param {number} options.timeout - Timeout in milliseconds (default: agent.timeoutMs or 120000)
  * @param {Function} options.onStdout - Optional callback for stdout data chunks
  * @param {Function} options.onStderr - Optional callback for stderr data chunks
- * @param {Set|Map} options.processTracker - Optional Set or Map to track active processes
+ * @param {ProcessManager} options.processManager - Optional ProcessManager to track active processes
  * @returns {Promise<{ok: boolean, output: string, error: string}>}
  */
 export async function spawnAgentProcess(agent, prompt, options = {}) {
@@ -24,7 +25,7 @@ export async function spawnAgentProcess(agent, prompt, options = {}) {
     timeout = agent.timeoutMs || 120000,
     onStdout = null,
     onStderr = null,
-    processTracker = null
+    processManager = null
   } = options;
 
   const args = agent.args.map(a => a.replace('{PROMPT}', prompt));
@@ -34,13 +35,9 @@ export async function spawnAgentProcess(agent, prompt, options = {}) {
       stdio: ['ignore', 'pipe', 'pipe']
     });
 
-    // Track in Set or Map if provided (supports both for flexibility)
-    if (processTracker) {
-      if (processTracker instanceof Map) {
-        processTracker.set(agent.id, proc);
-      } else {
-        processTracker.add(proc);
-      }
+    // Track in ProcessManager if provided
+    if (processManager instanceof ProcessManager) {
+      processManager.add(agent.id, proc);
     }
 
     let stdout = '';
@@ -63,12 +60,8 @@ export async function spawnAgentProcess(agent, prompt, options = {}) {
     });
 
     const cleanup = (code) => {
-      if (processTracker) {
-        if (processTracker instanceof Map) {
-          processTracker.delete(agent.id);
-        } else {
-          processTracker.delete(proc);
-        }
+      if (processManager instanceof ProcessManager) {
+        processManager.delete(agent.id);
       }
       clearTimeout(timeoutId);
     };

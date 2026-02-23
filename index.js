@@ -38,17 +38,17 @@ import { fileURLToPath } from "node:url";
 import { ANSI, ConversationLogger } from "./src/logger.js";
 import { SessionManager } from "./src/session-manager.js";
 import { BlessedInteractive } from "./src/blessed-interactive.js";
-import { spawnAgentProcess } from "./src/agent-process.js";
+import { getProcessManager } from "./src/process-manager.js";
 import {
   runOrchestration,
   configureOrchestration,
 } from "./src/orchestration.js";
 
 // ----- Signal handling for graceful shutdown --------------------------------
-const activeProcesses = new Set();
+const processManager = getProcessManager();
 
-// Make activeProcesses globally accessible for interactive mode
-global.activeProcesses = activeProcesses;
+// Make processManager globally accessible for interactive mode
+global.processManager = processManager;
 
 // Global flag to signal orchestration interruption
 global.orchestrationInterrupted = false;
@@ -57,14 +57,8 @@ global.orchestrationInterrupted = false;
 const INTERRUPTION_ERROR = "Interrupted by user";
 
 function gracefulShutdown(signal) {
-  // Clean up blessed UI if active
-
   console.log(`\nReceived ${signal}. Terminating active processes...`);
-  for (const child of activeProcesses) {
-    if (!child.killed) {
-      child.kill("SIGTERM");
-    }
-  }
+  processManager.killAll('SIGTERM');
   process.exit(0);
 }
 
@@ -728,13 +722,13 @@ async function runInteractiveMode() {
   const interactive = new BlessedInteractive({
     sessionManager: new SessionManager(),
     logger: LOGGER,
+    processManager,
+    agents,
+    questionHandler: async (question, config) => {
+      return runOrchestrationWithErrorHandling(question, config);
+    },
   });
 
-  interactive.setQuestionHandler(async (question, config) => {
-    return runOrchestrationWithErrorHandling(question, config);
-  });
-
-  interactive.sessionManager.setAgents(agents);
   await interactive.start();
 }
 
@@ -749,7 +743,7 @@ async function runNonInteractiveMode(question) {
     owner: OWNER,
     consensusMode,
     maxRounds,
-    activeProcesses,
+    processManager,
   });
 
   try {
@@ -775,7 +769,7 @@ async function runOrchestrationWithErrorHandling(question, config = {}) {
       owner: OWNER,
       consensusMode,
       maxRounds,
-      activeProcesses,
+      processManager,
     });
 
     // Run the full orchestration using the global LOGGER

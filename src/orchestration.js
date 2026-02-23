@@ -16,7 +16,7 @@ let DELIB = null;
 let OWNER = null;
 let consensusMode = "super";
 let maxRounds = 5;
-let activeProcesses = null;
+let processManager = null;
 
 // Export configuration setter
 export function configureOrchestration(config) {
@@ -27,7 +27,7 @@ export function configureOrchestration(config) {
   OWNER = config.owner;
   consensusMode = config.consensusMode;
   maxRounds = config.maxRounds;
-  activeProcesses = config.activeProcesses;
+  processManager = config.processManager;
 }
 
 // Generic function to log agent responses immediately based on phase
@@ -357,7 +357,7 @@ async function spawnAgentOncePTY(
     );
     const result = await spawnAgentProcess(agent, prompt, {
       timeout,
-      processTracker: activeProcesses,
+      processManager,
     });
 
     let stdout = result.output;
