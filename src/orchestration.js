@@ -84,6 +84,17 @@ function logAgentResponse(agent, json, phase) {
       }
       break;
 
+    case "action-agree":
+      const actionAgree = json.action_description || "";
+      const agreed = json.agreed ? "agreed" : "disagreed";
+      const reason = json.reason || "";
+      LOGGER.line(agent, "action-agree", `[${agreed.toUpperCase()}] ${actionAgree} ${reason ? `- ${reason}` : ''}`);
+      break;
+
+    case "execute":
+      LOGGER.line(agent, "execute", json.proposal || json.message || "Action executed");
+      break;
+
     default:
       LOGGER.line(agent, "warn", `Unknown phase: ${phase}`);
   }
@@ -369,7 +380,7 @@ async function spawnAgentOncePTY(
       return { ok: true, json, raw: stdout };
     } catch (parseErr) {
       // Log the failed normalized text to help debug
-      const normalizedJsonText = normalizeJsonText(stdout);
+      const normalizedJsonText = parser.parse(stdout);
       LOGGER.line(
         agent,
         "parse:error",
@@ -549,6 +560,223 @@ async function roundVote(agents, question, current) {
   return results;
 }
 
+// Determine if proposal is actionable and get agreement from agents
+async function checkActionAgreement(winningPayload, winnerId, agents, orchestrator, finalAnswer) {
+  // Check if proposal has actionable elements
+  const hasCodePatch = winningPayload.code_patch && winningPayload.code_patch.trim().length > 0;
+  const hasTests = winningPayload.tests && winningPayload.tests.length > 0;
+
+  if (!hasCodePatch && !hasTests) {
+    LOGGER.blockTitle("ℹ️ Proposal is informational only - no action needed");
+    LOGGER.line(
+      orchestrator,
+      "action",
+      "The winning proposal contains no code or commands to execute",
+    );
+    return { shouldExecute: false, actionable: false };
+  }
+
+  // Build prompt for action agreement
+  const winnerAgent = agents.find(a => a.id === winnerId);
+  const winnerName = winnerAgent?.displayName || winnerId;
+
+  const prompt = buildActionAgreePrompt(winnerName, finalAnswer);
+
+  // Ask all agents except the winner if they agree with executing
+  const otherAgents = agents.filter(a => a.id !== winnerId);
+
+  LOGGER.blockTitle("🔧 Action Agreement Check");
+  LOGGER.line(
+    orchestrator,
+    "action",
+    `Winning agent: ${winnerName} | Code patch: ${hasCodePatch ? 'yes' : 'no'} | Commands: ${hasTests ? 'yes' : 'no'}`,
+  );
+
+  // Show agents are evaluating action
+  for (const a of otherAgents) {
+    LOGGER.line(a, "", "Evaluating if action should proceed...");
+  }
+
+  const results = await Promise.all(
+    otherAgents.map(async (a) => {
+      const res = await spawnAgent(a, prompt, 120, "action-agree");
+      return { agentId: a.id, res };
+    }),
+  );
+
+  // Count agreements
+  const okResults = results.filter(r => r.res && r.res.ok);
+  let agreedCount = 0;
+  let disagreedAgents = [];
+
+  for (const result of okResults) {
+    try {
+      const json = result.res.json;
+      if (json.agreed) {
+        agreedCount++;
+      } else {
+        disagreedAgents.push({ id: result.agentId, reason: json.reason });
+      }
+    } catch (e) {
+      // Treat parse errors as disagreement
+      disagreedAgents.push({ id: result.agentId, reason: "Failed to parse response" });
+    }
+  }
+
+  const totalVoters = okResults.length;
+  const agreementRate = totalVoters > 0 ? agreedCount / totalVoters : 0;
+
+  LOGGER.line(
+    orchestrator,
+    "action",
+    `Agreement: ${agreedCount}/${totalVoters} (${(agreementRate * 100).toFixed(0)}%)`,
+  );
+
+  if (disagreedAgents.length > 0) {
+    for (const d of disagreedAgents) {
+      LOGGER.line(orchestrator, "action", `${d.id} disagreed: ${d.reason}`);
+    }
+  }
+
+  // Need majority agreement to execute
+  const shouldExecute = agreementRate >= 0.5;
+
+  if (shouldExecute) {
+    LOGGER.blockTitle("✅ Action approved by majority");
+    LOGGER.line(
+      orchestrator,
+      "action",
+      `Proceeding to execute action proposed by ${winnerName}`,
+    );
+  } else {
+    LOGGER.blockTitle("⚠️ Action rejected by majority");
+    LOGGER.line(
+      orchestrator,
+      "action",
+      `Action will not be executed - ${agreedCount}/${totalVoters} agreed`,
+    );
+  }
+
+  return {
+    shouldExecute,
+    actionable: true,
+    winnerId,
+    winnerAgent,
+    agreementRate,
+    agreedCount,
+    totalVoters,
+    payload: winningPayload,
+  };
+}
+
+function buildActionAgreePrompt(winnerName, finalAnswer) {
+  // Replace placeholders in prompt template
+  const prompt = PROMPTS.actionAgree
+    .replace(/\{\{WINNER_AGENT\}\}/g, winnerName)
+    .replace(/\{\{FINAL_ANSWER\}\}/g, finalAnswer);
+
+  return `${prompt}\n\nReturn JSON only.`;
+}
+
+function formatActionResponse(actionResult, winningPayload, executionResult, orchestrator) {
+  const winnerAgent = actionResult.winnerAgent;
+
+  const response = {
+    status: "action_approved",
+    winner: {
+      agent_id: actionResult.winnerId,
+      display_name: winnerAgent?.displayName || actionResult.winnerId,
+      avatar: winnerAgent?.avatar,
+    },
+    agreement: {
+      agreed: actionResult.agreedCount,
+      total: actionResult.totalVoters,
+      rate: actionResult.agreementRate,
+    },
+    proposal: winningPayload.proposal,
+    action: {
+      type: "execute_agent",
+      agent: {
+        id: winnerAgent?.id,
+        cmd: winnerAgent?.cmd,
+        args: winnerAgent?.args,
+      },
+      code_patch: winningPayload.code_patch || null,
+      tests: winningPayload.tests || [],
+    },
+    execution: {
+      ok: executionResult?.ok || false,
+      output: executionResult?.json || null,
+      error: executionResult?.error || null,
+    },
+  };
+
+  LOGGER.blockTitle("🚀 Returning Action Response");
+  LOGGER.line(orchestrator, "action", JSON.stringify(response, null, 2));
+
+  return JSON.stringify(response, null, 2);
+}
+
+async function executeAction(actionResult, winningPayload, agents, orchestrator) {
+  const winnerAgent = actionResult.winnerAgent;
+  
+  LOGGER.line(orchestrator, "action", '\n🚀 Executing approved action...\n');
+
+  const agent = agents.find(a => a.id === winnerAgent.id);
+  
+  if (!agent) {
+    LOGGER.line(orchestrator, "action", `❌ Agent ${winnerAgent.id} not found`);
+    return;
+  }
+
+  // Build prompt from proposal + code_patch (if not null) + tests
+  let prompt = '';
+  
+  // Add proposal
+  if (winningPayload.proposal) {
+    prompt += winningPayload.proposal + '\n\n';
+  }
+  
+  // Add code_patch if not null
+  if (winningPayload.code_patch) {
+    prompt += '```\n' + winningPayload.code_patch + '\n```\n\n';
+  }
+  
+  // Add tests if present
+  if (winningPayload.tests && winningPayload.tests.length > 0) {
+    prompt += 'Tests to run:\n' + winningPayload.tests.join('\n') + '\n\n';
+  }
+
+  const cwd = process.cwd();
+  prompt += `
+
+Working directory: ${cwd}
+
+Execute the above commands/tests and return JSON with this schema:
+{
+  "executed": true|false,
+  "output": "<what was executed and results>",
+  "error": "<any errors encountered, or null if none>",
+  "files_created": ["list of files created if any"],
+  "files_modified": ["list of files modified if any"]
+}
+
+Return JSON only.`;
+
+  LOGGER.line(orchestrator, "action", `Executing agent: ${agent.id} (${agent.displayName})...\n`);
+
+  // Use spawnAgent which handles retries and proper logging
+  const result = await spawnAgent(agent, prompt, 300, "execute");
+
+  if (result.ok) {
+    LOGGER.line(orchestrator, "action", '\n✅ Action executed successfully');
+  } else {
+    LOGGER.line(orchestrator, "action", `\n❌ Action execution failed: ${result.error || 'unknown error'}`);
+  }
+
+  return result;
+}
+
 // Main orchestration logic
 export async function runOrchestration(userQuestion, agents, paint) {
   // Reset interruption flag at the start
@@ -577,13 +805,13 @@ export async function runOrchestration(userQuestion, agents, paint) {
   );
 
   if (!LOGGER.quiet) {
-    console.log(
+    LOGGER.line(
       paint(
         `Owners: ${OWNER.ids.length ? OWNER.ids.join(", ") : "none"} | ownerMin=${OWNER.minScore} | ownerMode=${OWNER.mode}\n`,
         "gray",
       ),
     );
-    console.log(
+    LOGGER.line(
       paint(
         `Consensus=${consensusMode} | thresholds: U=${CONSENSUS.unanimousPct} S=${CONSENSUS.superMajorityPct} M=${CONSENSUS.majorityPct} | blockers=${CONSENSUS.requireNoBlockers ? "strict" : "allowed"} | rubberPenalty=${DELIB.weightPenaltyRubberStamp}\n`,
         "gray",
@@ -666,6 +894,11 @@ export async function runOrchestration(userQuestion, agents, paint) {
       return;
     }
 
+    // Show agents are working on revisions
+    for (const agent of agents) {
+      LOGGER.line(agent, "", "Revising my proposal based on feedback...");
+    }
+
     // Revision phase
     const revisions = await roundRevise(agents, userQuestion, current, crits);
 
@@ -694,6 +927,11 @@ export async function runOrchestration(userQuestion, agents, paint) {
           current[idx].payload = revisionPayload;
         }
       }
+    }
+
+    // Show agents are voting
+    for (const agent of agents) {
+      LOGGER.line(agent, "", "Voting on proposals...");
     }
 
     // Voting phase
@@ -793,6 +1031,18 @@ export async function runOrchestration(userQuestion, agents, paint) {
 
       // Format final answer using helper function
       const finalAnswer = formatFinalAnswer(winningPayload);
+
+      // Check if the proposal is actionable and needs agreement
+      const actionResult = await checkActionAgreement(winningPayload, winnerId, agents, orchestrator, finalAnswer);
+
+      // If actionable and needs execution, execute and return action JSON
+      if (actionResult.shouldExecute) {
+        // Show winner agent is executing
+        LOGGER.line(winnerAgent, "", "Executing approved action...");
+        
+        const executionResult = await executeAction(actionResult, winningPayload, agents, orchestrator);
+        return formatActionResponse(actionResult, winningPayload, executionResult, orchestrator);
+      }
 
       // Format and log the final result
       LOGGER.blockTitle("===== FINAL ANSWER =====");

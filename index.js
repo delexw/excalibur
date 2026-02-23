@@ -166,6 +166,7 @@ const PROMPTS = {
     .trim(),
   revise: fs.readFileSync(path.join(PROMPT_DIR, "revise.md"), "utf8").trim(),
   vote: fs.readFileSync(path.join(PROMPT_DIR, "vote.md"), "utf8").trim(),
+  actionAgree: fs.readFileSync(path.join(PROMPT_DIR, "action-agree.md"), "utf8").trim(),
 };
 
 // Colour wrapper helpers using imported ANSI and the noColor flag

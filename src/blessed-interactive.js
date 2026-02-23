@@ -1595,6 +1595,9 @@ export class BlessedInteractive {
     // Check if pane still has valid parent (not detached)
     if (!pane.parent || pane.detached) return;
 
+    // Clear any existing animation for this agent
+    this._clearAgentAnimation(agentId);
+
     const agent = this.sessionManager.getAgents().find((a) => a.id === agentId);
     const displayName = agent?.displayName || agentId;
 
@@ -1605,6 +1608,8 @@ export class BlessedInteractive {
       case "running":
         statusSymbol = "[...]";
         borderColor = "yellow";
+        // Start animation
+        this._startAgentAnimation(agentId, pane, displayName, agent?.color || "white");
         break;
       case "completed":
         statusSymbol = "[✓]";
@@ -1622,6 +1627,45 @@ export class BlessedInteractive {
       this.screen.render();
     } catch (err) {
       // Silently ignore errors from detached panes
+    }
+  }
+
+  /**
+   * Start animation for running agent
+   */
+  _startAgentAnimation(agentId, pane, displayName, baseColor) {
+    const spinChars = ['|', '/', '-', '\\'];
+    let spinIdx = 0;
+
+    this._agentAnimations = this._agentAnimations || new Map();
+
+    const animationInterval = setInterval(() => {
+      try {
+        if (!pane.parent || pane.detached) {
+          this._clearAgentAnimation(agentId);
+          return;
+        }
+
+        // Spin the status symbol
+        spinIdx = (spinIdx + 1) % spinChars.length;
+        pane.setLabel(` ${displayName} [${spinChars[spinIdx]}] `);
+
+        this.screen.render();
+      } catch (err) {
+        this._clearAgentAnimation(agentId);
+      }
+    }, 150);
+
+    this._agentAnimations.set(agentId, animationInterval);
+  }
+
+  /**
+   * Clear animation for agent
+   */
+  _clearAgentAnimation(agentId) {
+    if (this._agentAnimations && this._agentAnimations.has(agentId)) {
+      clearInterval(this._agentAnimations.get(agentId));
+      this._agentAnimations.delete(agentId);
     }
   }
 
@@ -1695,6 +1739,14 @@ export class BlessedInteractive {
       this.filterInterval = null;
     }
 
+    // Clear all agent animations
+    if (this._agentAnimations) {
+      for (const interval of this._agentAnimations.values()) {
+        clearInterval(interval);
+      }
+      this._agentAnimations.clear();
+    }
+
     // Kill all active processes
     if (this.activeProcesses) {
       for (const [agentId, proc] of this.activeProcesses.entries()) {
@@ -1711,6 +1763,7 @@ export class BlessedInteractive {
     if (this.screen) {
       this.screen.destroy();
     }
+    console.log('\n👋 Interactive session ended. Returning to terminal.\n');
     process.exit(0);
   }
 }
