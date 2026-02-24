@@ -15,7 +15,6 @@
 import blessed from "blessed";
 import { SessionManager } from "./session-manager.js";
 import { DirectRunner } from "./direct-runner.js";
-import { spawnAgentProcess } from "./orchestration/agent-spawner.js";
 
 // Common widget configurations (DRY principle)
 const SCROLLBAR_CONFIG = {
@@ -107,10 +106,8 @@ export class BlessedInteractive {
     this.UI_MODES = {
       INTERACTIVE: "interactive",
       ORCHESTRATION: "orchestration",
-      AGENT_CHAT: "agent_chat",
     };
     this.currentMode = this.UI_MODES.INTERACTIVE;
-    this.selectedAgents = []; // For agent chat mode
     this.isSubmitting = false; // Guard against double submission
     this.orchestrationActive = false; // Track if orchestration is actively running
   }
@@ -534,9 +531,6 @@ export class BlessedInteractive {
       // In orchestration mode, adjust panel sizes
       const agents = this.agents;
       this.resizeOrchestrationLayout(agents);
-    } else if (this.currentMode === this.UI_MODES.AGENT_CHAT) {
-      // In agent chat mode, adjust selected agent panels
-      this.resizeOrchestrationLayout(this.selectedAgents);
     }
     // Interactive mode doesn't need special handling - blessed handles it
     this.screen.render();
@@ -638,7 +632,6 @@ export class BlessedInteractive {
         const commands = [
           "/help",
           "/question",
-          "/chat",
           "/config",
           "/agents",
           "/history",
@@ -783,25 +776,6 @@ export class BlessedInteractive {
         this.showAgents();
         break;
 
-      case "/chat":
-        if (args.length === 0) {
-          this.outputBox.log(
-            '{red-fg}Usage: /chat <agent1> [agent2] ... or "all"{/red-fg}',
-          );
-          this.outputBox.log(
-            "Example: {bold}/chat claude{/bold} - Chat with Claude only",
-          );
-          this.outputBox.log(
-            "Example: {bold}/chat claude gemini{/bold} - Chat with Claude and Gemini",
-          );
-          this.outputBox.log(
-            "Example: {bold}/chat all{/bold} - Use all agents (orchestration mode)",
-          );
-        } else {
-          await this.selectAgentsForChat(args);
-        }
-        break;
-
       case "/history":
         this.showHistory();
         break;
@@ -830,7 +804,6 @@ export class BlessedInteractive {
     const validCommands = [
       "/help",
       "/question",
-      "/chat",
       "/config",
       "/agents",
       "/history",
@@ -847,7 +820,6 @@ export class BlessedInteractive {
     const commands = [
       { cmd: "/help", desc: "Show this help" },
       { cmd: "/question", desc: "Ask a question to agents" },
-      { cmd: "/chat", desc: "Chat with specific agents" },
       { cmd: "/config", desc: "Show/modify configuration" },
       { cmd: "/agents", desc: "List available agents" },
       { cmd: "/history", desc: "Show command history" },
@@ -882,7 +854,6 @@ export class BlessedInteractive {
     const commands = [
       { cmd: "/help", desc: "Show this help" },
       { cmd: "/question", desc: "Ask a question to agents" },
-      { cmd: "/chat", desc: "Chat with specific agents" },
       { cmd: "/config", desc: "Show/modify configuration" },
       { cmd: "/agents", desc: "List available agents" },
       { cmd: "/history", desc: "Show command history" },
@@ -961,12 +932,6 @@ export class BlessedInteractive {
     );
     this.outputBox.log(
       "  {bold}/question <text>{/bold}         - Ask a question to agents",
-    );
-    this.outputBox.log(
-      "  {bold}/chat <agents>{/bold}           - Chat with specific agents (e.g., /chat claude gemini)",
-    );
-    this.outputBox.log(
-      "  {bold}/chat all{/bold}                - Return to orchestration mode (all agents)",
     );
     this.outputBox.log(
       "  {bold}/config{/bold}                  - Show configuration",
@@ -1068,174 +1033,10 @@ export class BlessedInteractive {
   }
 
   /**
-   * Select agents for chat mode
-   */
-  async selectAgentsForChat(agentNames) {
-    const allAgents = this.agents;
-
-    if (agentNames.length === 1 && agentNames[0].toLowerCase() === "all") {
-      // Use all agents - full orchestration mode
-      this.selectedAgents = [];
-      this.outputBox.log(
-        "{green-fg}✓ Using all agents (orchestration mode){/green-fg}",
-      );
-      this.outputBox.log("");
-      return;
-    }
-
-    // Find matching agents
-    const selected = [];
-    const notFound = [];
-
-    for (const name of agentNames) {
-      const agent = allAgents.find(
-        (a) =>
-          a.id.toLowerCase() === name.toLowerCase() ||
-          a.displayName.toLowerCase().includes(name.toLowerCase()),
-      );
-      if (agent) {
-        selected.push(agent);
-      } else {
-        notFound.push(name);
-      }
-    }
-
-    if (notFound.length > 0) {
-      this.outputBox.log(
-        `{yellow-fg}⚠️  Agent(s) not found: ${notFound.join(", ")}{/yellow-fg}`,
-      );
-    }
-
-    if (selected.length === 0) {
-      this.outputBox.log("{red-fg}✗ No valid agents selected{/red-fg}");
-      this.outputBox.log("");
-      return;
-    }
-
-    this.selectedAgents = selected;
-
-    const agentList = selected
-      .map((a) => `${a.avatar || "🤖"} ${a.displayName || a.id}`)
-      .join(", ");
-    this.outputBox.log(
-      `{green-fg}✓ Chat mode activated with: ${agentList}{/green-fg}`,
-    );
-    this.outputBox.log(
-      "{gray-fg}Your messages will be sent directly to these agents without orchestration.{/gray-fg}",
-    );
-    this.outputBox.log(
-      "{gray-fg}Use {bold}/chat all{/bold} to return to orchestration mode.{/gray-fg}",
-    );
-    this.outputBox.log("");
-  }
-
-  /**
-   * Spawn agent process and stream output to panel (SOLID: Single Responsibility)
-   * @private
-   * @param {Object} agent - Agent configuration
-   * @param {string} prompt - Prompt to send to agent
-   * @returns {Promise<string>} - Full output from agent
-   */
-  async _spawnAgentProcess(agent, prompt) {
-    let buffer = "";
-
-    // Use shared spawn utility with streaming callback
-    const result = await spawnAgentProcess(agent, prompt, {
-      onStdout: (text) => {
-        buffer += text;
-
-        // Display complete lines only
-        const lines = buffer.split("\n");
-        if (lines.length > 1) {
-          // Last item is incomplete line, keep it
-          buffer = lines.pop();
-
-          // Display complete lines
-          for (const line of lines) {
-            if (line.trim() && this.agentPanes.has(agent.id)) {
-              this.appendToAgentPanel(agent.id, line);
-            }
-          }
-        }
-      },
-      processManager: this.processManager,
-    });
-
-    // Display any remaining buffer
-    if (buffer.trim() && this.agentPanes.has(agent.id)) {
-      this.appendToAgentPanel(agent.id, buffer);
-    }
-
-    return result.output;
-  }
-
-  /**
-   * Send message directly to selected agents (agent chat mode)
-   */
-  async sendToAgentsDirectly(question) {
-    const config = this.config;
-
-    // Create agent panels
-    if (this.currentMode === this.UI_MODES.INTERACTIVE) {
-      await this.switchToAgentChatMode();
-    }
-
-    // Send to each selected agent
-    for (const agent of this.selectedAgents) {
-      try {
-        this.outputBox.log(
-          `{cyan-fg}${agent.avatar || "🤖"} ${agent.displayName || agent.id}: Thinking...{/cyan-fg}`,
-        );
-        if (this.agentPanes.has(agent.id)) {
-          this.appendToAgentPanel(
-            agent.id,
-            `{cyan-fg}User: ${question}{/cyan-fg}`,
-          );
-          this.appendToAgentPanel(agent.id, "");
-        }
-
-        // Use shared spawn method (DRY principle)
-        await this._spawnAgentProcess(agent, question);
-
-        this.outputBox.log(
-          `{green-fg}${agent.avatar || "🤖"} ${agent.displayName || agent.id}: Done{/green-fg}`,
-        );
-      } catch (error) {
-        this.outputBox.log(
-          `{red-fg}✗ Error with ${agent.displayName || agent.id}: ${error.message}{/red-fg}`,
-        );
-        this.outputBox.log("");
-        if (this.agentPanes.has(agent.id)) {
-          this.appendToAgentPanel(
-            agent.id,
-            `{red-fg}Error: ${error.message}{/red-fg}`,
-          );
-          this.appendToAgentPanel(agent.id, "");
-        }
-      }
-    }
-
-    // Switch back to interactive mode
-    if (this.currentMode === this.UI_MODES.AGENT_CHAT) {
-      await this.switchToInteractiveMode();
-    }
-
-    this.sessionManager.addToHistory(question, true);
-  }
-
-  /**
-   * Handle question (start orchestration or agent chat)
+   * Handle question (start orchestration)
    */
   async handleQuestion(question) {
     try {
-      // Check if in agent chat mode
-      if (this.selectedAgents.length > 0) {
-        this.outputBox.log("{cyan-fg}Sending to selected agents...{/cyan-fg}");
-        this.outputBox.log("");
-        await this.sendToAgentsDirectly(question);
-        return;
-      }
-
       // Normal orchestration mode
       this.outputBox.log("{cyan-fg}Starting orchestration...{/cyan-fg}");
       this.outputBox.log("");
@@ -1379,35 +1180,6 @@ export class BlessedInteractive {
       }
     }
     this.agentPanes.clear();
-  }
-
-  /**
-   * Switch to agent chat mode (hide interactive UI, show only selected agent panes)
-   */
-  async switchToAgentChatMode() {
-    if (this.currentMode === this.UI_MODES.AGENT_CHAT) return;
-
-    // Clear blessed UI from logger before mode switch
-    if (this.logger) {
-      this.logger.setBlessedUI(null);
-    }
-
-    // Hide any existing orchestration panels
-    this._hideOrchestrationPanels();
-
-    // Hide interactive UI elements
-    this.logoBox.hide();
-    this.outputBox.hide();
-    this.inputBox.hide();
-    this.statusBar.hide();
-
-    // Update state
-    this.currentMode = this.UI_MODES.AGENT_CHAT;
-
-    // Create layout for selected agents only (no orchestration log)
-    this.createOrchestrationLayout(this.selectedAgents);
-
-    this.screen.render();
   }
 
   /**

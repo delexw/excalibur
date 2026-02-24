@@ -1,5 +1,3 @@
-import { spawn } from 'node:child_process';
-import { ProcessManager } from '../process-manager.js';
 import { getParserForAgent } from '../parsers/index.js';
 
 export class AgentSpawner {
@@ -62,7 +60,7 @@ export class AgentSpawner {
 
     let result;
     try {
-      result = await spawnAgentProcess(agent, prompt, { timeout, processManager: this.processManager });
+      result = await this.processManager.spawnProcess(agent, prompt, { timeout });
     } catch (err) {
       if (this.logger?.blessedUI?.setAgentStatus) {
         this.logger.blessedUI.setAgentStatus(agent.id, "failed");
@@ -137,77 +135,4 @@ export class AgentSpawner {
         break;
     }
   }
-}
-
-export async function spawnAgentProcess(agent, prompt, options = {}) {
-  const {
-    timeout = agent.timeoutMs || 120000,
-    onStdout = null,
-    onStderr = null,
-    processManager = null
-  } = options;
-
-  const args = agent.args.map(a => a.replace('{PROMPT}', prompt));
-
-  return new Promise((resolve, reject) => {
-    const proc = spawn(agent.cmd, args, {
-      stdio: ['ignore', 'pipe', 'pipe']
-    });
-
-    if (processManager instanceof ProcessManager) {
-      processManager.add(agent.id, proc);
-    }
-
-    let stdout = '';
-    let stderr = '';
-
-    proc.stdout.on('data', (data) => {
-      const text = data.toString();
-      stdout += text;
-      if (onStdout) {
-        onStdout(text);
-      }
-    });
-
-    proc.stderr.on('data', (data) => {
-      const text = data.toString();
-      stderr += text;
-      if (onStderr) {
-        onStderr(text);
-      }
-    });
-
-    let settled = false;
-    let timedOut = false;
-    const settle = (fn, val) => {
-      if (!settled) {
-        settled = true;
-        fn(val);
-      }
-    };
-
-    const cleanup = () => {
-      if (processManager instanceof ProcessManager) {
-        processManager.delete(agent.id);
-      }
-    };
-
-    proc.on('close', (code) => {
-      if (!timedOut) clearTimeout(timeoutId);
-      cleanup();
-      settle(resolve, { ok: code === 0, output: stdout, error: stderr });
-    });
-
-    proc.on('error', (err) => {
-      if (!timedOut) clearTimeout(timeoutId);
-      cleanup();
-      settle(reject, err);
-    });
-
-    const timeoutId = setTimeout(() => {
-      timedOut = true;
-      cleanup();
-      settle(reject, new Error(`Process killed by timeout after ${timeout}ms`));
-    }, timeout);
-  });
 }

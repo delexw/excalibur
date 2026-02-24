@@ -5,6 +5,8 @@
  * when spawning agent CLI processes across different modules.
  */
 
+import { spawn } from 'node:child_process';
+
 export class ProcessManager {
   constructor() {
     this.processes = new Map();
@@ -79,6 +81,74 @@ export class ProcessManager {
 
   *[Symbol.iterator]() {
     yield* this.processes.values();
+  }
+
+  async spawnProcess(agent, prompt, options = {}) {
+    const {
+      timeout = agent.timeoutMs || 120000,
+      onStdout = null,
+      onStderr = null
+    } = options;
+
+    const args = agent.args.map(a => a.replace('{PROMPT}', prompt));
+
+    return new Promise((resolve, reject) => {
+      const proc = spawn(agent.cmd, args, {
+        stdio: ['ignore', 'pipe', 'pipe']
+      });
+
+      this.add(agent.id, proc);
+
+      let stdout = '';
+      let stderr = '';
+
+      proc.stdout.on('data', (data) => {
+        const text = data.toString();
+        stdout += text;
+        if (onStdout) {
+          onStdout(text);
+        }
+      });
+
+      proc.stderr.on('data', (data) => {
+        const text = data.toString();
+        stderr += text;
+        if (onStderr) {
+          onStderr(text);
+        }
+      });
+
+      let settled = false;
+      let timedOut = false;
+      const settle = (fn, val) => {
+        if (!settled) {
+          settled = true;
+          fn(val);
+        }
+      };
+
+      const cleanup = () => {
+        this.delete(agent.id);
+      };
+
+      proc.on('close', (code) => {
+        if (!timedOut) clearTimeout(timeoutId);
+        cleanup();
+        settle(resolve, { ok: code === 0, output: stdout, error: stderr });
+      });
+
+      proc.on('error', (err) => {
+        if (!timedOut) clearTimeout(timeoutId);
+        cleanup();
+        settle(reject, err);
+      });
+
+      const timeoutId = setTimeout(() => {
+        timedOut = true;
+        cleanup();
+        settle(reject, new Error(`Process killed by timeout after ${timeout}ms`));
+      }, timeout);
+    });
   }
 }
 

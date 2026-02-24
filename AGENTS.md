@@ -98,7 +98,7 @@ import { SessionManager } from './session-manager.js';
 
 - **Files**: kebab-case (e.g., `agent-process.js`, `session-manager.js`)
 - **Classes**: PascalCase (e.g., `ConversationLogger`, `SessionManager`)
-- **Functions**: camelCase (e.g., `spawnAgentProcess`, `runOrchestration`)
+- **Functions**: camelCase (e.g., `spawnProcess`, `runOrchestration`)
 - **Constants**: UPPER_SNAKE_CASE (e.g., `INTERRUPTION_ERROR`)
 - **Configuration keys**: camelCase in JSON
 
