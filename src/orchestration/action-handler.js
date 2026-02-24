@@ -92,31 +92,11 @@ export class ActionHandler {
       return;
     }
 
-    let prompt = '';
-    if (winningPayload.proposal) {
-      prompt += winningPayload.proposal + '\n\n';
-    }
-    if (winningPayload.code_patch) {
-      prompt += '```\n' + winningPayload.code_patch + '\n```\n\n';
-    }
-    if (winningPayload.tests && winningPayload.tests.length > 0) {
-      prompt += 'Tests to run:\n' + winningPayload.tests.join('\n') + '\n\n';
-    }
-
-    const cwd = process.cwd();
-    prompt += `
-Working directory: ${cwd}
-
-Execute the above commands/tests and return JSON with this schema:
-{
-  "executed": true|false,
-  "output": "<what was executed and results>",
-  "error": "<any errors encountered, or null if none>",
-  "files_created": ["list of files created if any"],
-  "files_modified": ["list of files modified if any"]
-}
-
-Return JSON only.`;
+    let prompt = this.prompts.actionExecute || "";
+    prompt = prompt.replace("{{PROPOSAL}}", winningPayload.proposal || "");
+    prompt = prompt.replace("{{CODE_PATCH}}", winningPayload.code_patch ? `\`\`\`\n${winningPayload.code_patch}\n\`\`\`` : "");
+    prompt = prompt.replace("{{TESTS}}", winningPayload.tests && winningPayload.tests.length > 0 ? "Tests to run:\n" + winningPayload.tests.join("\n") : "");
+    prompt = prompt.replace("{{CWD}}", process.cwd());
 
     this.logger.line(orchestrator, "action", `Executing agent: ${agent.id} (${agent.displayName})...\n`);
     const result = await this.agentSpawner.spawn(agent, prompt, 300, "execute");
