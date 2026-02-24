@@ -14,7 +14,8 @@
 
 import blessed from "blessed";
 import { SessionManager } from "./session-manager.js";
-import { spawnAgentProcess } from "./agent-process.js";
+import { DirectRunner } from "./direct-runner.js";
+import { spawnAgentProcess } from "./orchestration/agent-spawner.js";
 
 // Common widget configurations (DRY principle)
 const SCROLLBAR_CONFIG = {
@@ -78,16 +79,17 @@ class WidgetFactory {
 export class BlessedInteractive {
   constructor(options = {}) {
     this.sessionManager = options.sessionManager || new SessionManager();
-    this.questionHandler = options.questionHandler || null;
     this.logger = options.logger || null;
     this.processManager = options.processManager || null;
+    this.agents = options.agents || [];
+    this.config = options.config || {};
 
-    if (options.agents) {
-      this.sessionManager.setAgents(options.agents);
-      if (this.logger) {
-        this.logger.setAgents(options.agents);
-      }
-    }
+    this.runner = new DirectRunner({
+      logger: this.logger,
+      processManager: this.processManager,
+      agents: this.agents,
+      config: this.config,
+    });
 
     this.screen = null;
     this.inputBox = null;
@@ -466,15 +468,12 @@ export class BlessedInteractive {
    * Get status bar text
    */
   getStatusText() {
-    const config = this.sessionManager.getConfig();
+    const config = this.config;
     const ownerInfo =
       config.owner && config.owner.length > 0
         ? ` | 👑 Owner: ${config.owner.join(", ")}`
         : "";
-    const blessedStatus = config.blessed
-      ? "🖥️ Interactive UI"
-      : "📟 Terminal mode";
-    return `📁 ${process.cwd()} | ⚖️ Consensus: ${config.consensus} | 🔄 Rounds: ${config.maxRounds} | ${blessedStatus}${ownerInfo} | /help for commands`;
+    return `📁 ${process.cwd()} | ⚖️ Consensus: ${config.consensus} | 🔄 Rounds: ${config.maxRounds} | 🖥️ Interactive UI${ownerInfo} | /help for commands`;
   }
 
   /**
@@ -533,7 +532,7 @@ export class BlessedInteractive {
   handleResize() {
     if (this.currentMode === this.UI_MODES.ORCHESTRATION) {
       // In orchestration mode, adjust panel sizes
-      const agents = this.sessionManager.getAgents();
+      const agents = this.agents;
       this.resizeOrchestrationLayout(agents);
     } else if (this.currentMode === this.UI_MODES.AGENT_CHAT) {
       // In agent chat mode, adjust selected agent panels
@@ -1002,7 +1001,7 @@ export class BlessedInteractive {
    * Show configuration
    */
   showConfig() {
-    const config = this.sessionManager.getConfig();
+    const config = this.config;
     this.outputBox.log(
       "{bold}{cyan-fg}Current Configuration:{/cyan-fg}{/bold}",
     );
@@ -1018,18 +1017,18 @@ export class BlessedInteractive {
    * Update configuration
    */
   updateConfig(key, value) {
-    // Parse value
-    let parsedValue = value;
-    if (value === "true") parsedValue = true;
-    else if (value === "false") parsedValue = false;
-    else if (!isNaN(value)) parsedValue = Number(value);
-    else if (value.includes(",")) parsedValue = value.split(",");
+    try {
+      let parsedValue = value;
+      if (value === "true") parsedValue = true;
+      else if (value === "false") parsedValue = false;
+      else if (!isNaN(value)) parsedValue = Number(value);
+      else if (value.includes(",")) parsedValue = value.split(",");
 
-    if (this.sessionManager.updateConfig(key, parsedValue)) {
+      this.config[key] = parsedValue;
       this.outputBox.log(`{green-fg}✓ Set ${key} = ${value}{/green-fg}`);
       this.statusBar.setContent(this.getStatusText());
-    } else {
-      this.outputBox.log(`{red-fg}✗ Invalid config key: ${key}{/red-fg}`);
+    } catch (error) {
+      this.outputBox.log(`{red-fg}✗ Failed to set ${key}: ${error.message}{/red-fg}`);
     }
   }
 
@@ -1037,7 +1036,7 @@ export class BlessedInteractive {
    * Show agents
    */
   showAgents() {
-    const agents = this.sessionManager.getAgents();
+    const agents = this.agents;
     this.outputBox.log("{bold}{cyan-fg}Available Agents:{/cyan-fg}{/bold}");
     this.outputBox.log("");
     for (const agent of agents) {
@@ -1072,7 +1071,7 @@ export class BlessedInteractive {
    * Select agents for chat mode
    */
   async selectAgentsForChat(agentNames) {
-    const allAgents = this.sessionManager.getAgents();
+    const allAgents = this.agents;
 
     if (agentNames.length === 1 && agentNames[0].toLowerCase() === "all") {
       // Use all agents - full orchestration mode
@@ -1174,10 +1173,10 @@ export class BlessedInteractive {
    * Send message directly to selected agents (agent chat mode)
    */
   async sendToAgentsDirectly(question) {
-    const config = this.sessionManager.getConfig();
+    const config = this.config;
 
-    // Create agent panels if blessed UI is enabled
-    if (config.blessed && this.currentMode === this.UI_MODES.INTERACTIVE) {
+    // Create agent panels
+    if (this.currentMode === this.UI_MODES.INTERACTIVE) {
       await this.switchToAgentChatMode();
     }
 
@@ -1216,8 +1215,8 @@ export class BlessedInteractive {
       }
     }
 
-    // Switch back to interactive mode if blessed UI was used
-    if (config.blessed && this.currentMode === this.UI_MODES.AGENT_CHAT) {
+    // Switch back to interactive mode
+    if (this.currentMode === this.UI_MODES.AGENT_CHAT) {
       await this.switchToInteractiveMode();
     }
 
@@ -1228,14 +1227,6 @@ export class BlessedInteractive {
    * Handle question (start orchestration or agent chat)
    */
   async handleQuestion(question) {
-    if (!this.questionHandler) {
-      this.outputBox.log(
-        "{red-fg}Error: No question handler configured{/red-fg}",
-      );
-      return;
-    }
-
-    let config;
     try {
       // Check if in agent chat mode
       if (this.selectedAgents.length > 0) {
@@ -1249,24 +1240,22 @@ export class BlessedInteractive {
       this.outputBox.log("{cyan-fg}Starting orchestration...{/cyan-fg}");
       this.outputBox.log("");
 
-      // Get config and check if blessed UI should be used
-      config = this.sessionManager.getConfig();
+      // Get config
+      const config = this.config;
 
-      if (config.blessed) {
-        // Switch to orchestration mode (multi-pane)
-        await this.switchToOrchestrationMode();
-        // Mark orchestration as active for auto-scrolling
-        this.orchestrationActive = true;
-      }
+      // Switch to orchestration mode (multi-pane)
+      await this.switchToOrchestrationMode();
+      // Mark orchestration as active for auto-scrolling
+      this.orchestrationActive = true;
 
       // Run orchestration
-      const result = await this.questionHandler(question, config);
+      const result = await this.runner.run(question);
 
       // Mark orchestration as inactive to allow user scrolling
       this.orchestrationActive = false;
 
       // Display final answer FIRST (while blessed UI is still active)
-      if (result.success && result.finalAnswer) {
+      if (result.success && typeof result.finalAnswer === 'string') {
         // Keep blessed UI active to catch any final logs
         // Don't switch modes yet
       } else if (!result.success) {
@@ -1277,14 +1266,12 @@ export class BlessedInteractive {
       }
 
       // NOW switch back to interactive mode and display result
-      if (config.blessed) {
-        // Switch back to interactive mode (destroys panels and recreates initial UI)
-        // This is now fully synchronous - no waiting needed
-        await this.switchToInteractiveMode();
-      }
+      // Switch back to interactive mode (destroys panels and recreates initial UI)
+      // This is now fully synchronous - no waiting needed
+      await this.switchToInteractiveMode();
 
       // Display final answer in the fresh output box
-      if (result.success && result.finalAnswer) {
+      if (result.success && typeof result.finalAnswer === 'string') {
         this.outputBox.log("");
         this.outputBox.log("{cyan-fg}" + "═".repeat(60) + "{/cyan-fg}");
         this.outputBox.log(
@@ -1304,15 +1291,13 @@ export class BlessedInteractive {
       }
     } catch (error) {
       // Ensure we switch back to interactive mode on error
-      if (config && config.blessed) {
-        try {
-          await this.switchToInteractiveMode();
-        } catch (switchError) {
-          console.error(
-            "Error switching back to interactive mode:",
-            switchError,
-          );
-        }
+      try {
+        await this.switchToInteractiveMode();
+      } catch (switchError) {
+        console.error(
+          "Error switching back to interactive mode:",
+          switchError,
+        );
       }
 
       // If outputBox is null (during mode switch), log to console instead
@@ -1450,7 +1435,7 @@ export class BlessedInteractive {
     this.currentMode = this.UI_MODES.ORCHESTRATION;
 
     // Get agents from session manager
-    const agents = this.sessionManager.getAgents();
+    const agents = this.agents;
 
     // Create fresh orchestration layout
     this.createOrchestrationLayout(agents);
@@ -1600,7 +1585,7 @@ export class BlessedInteractive {
     // Clear any existing animation for this agent
     this._clearAgentAnimation(agentId);
 
-    const agent = this.sessionManager.getAgents().find((a) => a.id === agentId);
+    const agent = this.agents.find((a) => a.id === agentId);
     const displayName = agent?.displayName || agentId;
 
     let statusSymbol = "";

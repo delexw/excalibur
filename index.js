@@ -57,6 +57,7 @@ OPTIONS:
   --unanimousPct=X      Override unanimous threshold (default: 0.75)
   --superMajorityPct=X  Override super majority threshold (default: 0.75)
   --majorityPct=X       Override majority threshold (default: 0.5)
+  --responseThreshold=X Response threshold (default: 0.8)
   --allow-blockers      Allow consensus with blockers
   --rubberPenalty=X     Rubber-stamping penalty (default: 0.5)
   --owner=ID1,ID2,...  Require owner approval
@@ -74,12 +75,14 @@ OPTIONS:
 }
 
 // ----- Initialize logger ----------------------------------------------------
+const agents = config.getAgents();
 const LOGGER = new ConversationLogger(
   config.get('log.dir'),
   config.get('log.session'),
   {
     noColor: config.get('log.noColor'),
     quiet: config.get('log.quiet'),
+    agents,
   }
 );
 
@@ -96,44 +99,24 @@ const LOGGER = new ConversationLogger(
 })();
 
 async function runInteractiveMode() {
-  const agents = config.getAgents();
-
   const interactive = new BlessedInteractive({
-    sessionManager: new SessionManager(),
+    sessionManager: new SessionManager({ agents }),
     logger: LOGGER,
     processManager,
     agents,
-    questionHandler: async (question, newConfig) => {
-      return runDirectModeWithConfig(question, newConfig);
-    },
+    config: config.settings,
   });
 
   await interactive.start();
 }
 
 async function runDirectMode(question) {
-  const agents = config.getAgents();
   const runner = new DirectRunner({
     logger: LOGGER,
     processManager,
     agents,
-    prompts: config.getPrompts(),
     config: config.settings,
   });
 
   await runner.run(question);
-}
-
-async function runDirectModeWithConfig(question, newConfig = {}) {
-  const agents = config.getAgents();
-  const runner = new DirectRunner({
-    logger: LOGGER,
-    processManager,
-    agents,
-    prompts: config.getPrompts(),
-    config: config.settings,
-  });
-
-  runner.applyConfig(newConfig);
-  return runner.run(question);
 }

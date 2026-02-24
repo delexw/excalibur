@@ -20,7 +20,7 @@ export class Config {
     const __dirname = path.dirname(__filename);
     const PROMPT_DIR = path.join(__dirname, "..", "prompts");
     
-    this.prompts = {
+    this.settings.sysPrompts = {
       propose: fs.readFileSync(path.join(PROMPT_DIR, "propose.md"), "utf8").trim(),
       critique: fs.readFileSync(path.join(PROMPT_DIR, "critique.md"), "utf8").trim(),
       revise: fs.readFileSync(path.join(PROMPT_DIR, "revise.md"), "utf8").trim(),
@@ -30,7 +30,7 @@ export class Config {
   }
 
   getPrompts() {
-    return this.prompts;
+    return this.settings.sysPrompts;
   }
 
   get(key) {
@@ -54,11 +54,11 @@ export class Config {
     };
 
     const PRESETS = {
-      strict: { unanimousPct: 0.85, superMajorityPct: 0.8, majorityPct: 0.6, requireNoBlockers: true, rubberPenalty: 0.35 },
-      default: { unanimousPct: 0.75, superMajorityPct: 0.75, majorityPct: 0.5, requireNoBlockers: true, rubberPenalty: 0.5 },
-      fast: { unanimousPct: 0.7, superMajorityPct: 0.66, majorityPct: 0.5, requireNoBlockers: false, rubberPenalty: 0.6 },
-      experiment: { unanimousPct: 0.6, superMajorityPct: 0.6, majorityPct: 0.5, requireNoBlockers: false, rubberPenalty: 0.7 },
-      team: { unanimousPct: 0.8, superMajorityPct: 0.75, majorityPct: 0.55, requireNoBlockers: true, rubberPenalty: 0.35 },
+      strict: { unanimousPct: 0.85, superMajorityPct: 0.8, majorityPct: 0.6, requireNoBlockers: true, rubberPenalty: 0.35, responseThreshold: 0.8 },
+      default: { unanimousPct: 0.75, superMajorityPct: 0.75, majorityPct: 0.5, requireNoBlockers: true, rubberPenalty: 0.5, responseThreshold: 0.8 },
+      fast: { unanimousPct: 0.7, superMajorityPct: 0.66, majorityPct: 0.5, requireNoBlockers: false, rubberPenalty: 0.6, responseThreshold: 0.8 },
+      experiment: { unanimousPct: 0.6, superMajorityPct: 0.6, majorityPct: 0.5, requireNoBlockers: false, rubberPenalty: 0.7, responseThreshold: 0.8 },
+      team: { unanimousPct: 0.8, superMajorityPct: 0.75, majorityPct: 0.55, requireNoBlockers: true, rubberPenalty: 0.35, responseThreshold: 0.8 },
     };
 
     // Start with default preset
@@ -75,6 +75,7 @@ export class Config {
     activePreset.superMajorityPct = numFlag("superMajorityPct", activePreset.superMajorityPct);
     activePreset.majorityPct = numFlag("majorityPct", activePreset.majorityPct);
     activePreset.rubberPenalty = numFlag("rubberPenalty", activePreset.rubberPenalty);
+    activePreset.responseThreshold = numFlag("responseThreshold", activePreset.responseThreshold);
     activePreset.requireNoBlockers = this.argv.includes("--allow-blockers") ? false : activePreset.requireNoBlockers;
 
     const ownerStr = strFlag("owner", "");
@@ -89,6 +90,7 @@ export class Config {
         majorityPct: activePreset.majorityPct,
         requireNoBlockers: activePreset.requireNoBlockers,
         rubberPenalty: activePreset.rubberPenalty,
+        responseThreshold: activePreset.responseThreshold,
       },
       owner: {
         ids: ownerIds,

@@ -131,14 +131,6 @@ export class ConversationLogger {
   }
 
   /**
-   * Set or update the agents array for conversation highlighting
-   * @param {Array} agents - Array of agent objects
-   */
-  setAgents(agents) {
-    this.agents = agents;
-  }
-
-  /**
    * Set the blessed UI instance for output routing
    * @param {Object} blessedUI - BlessedUI instance
    */
