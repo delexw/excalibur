@@ -30,7 +30,7 @@ const config = new Config();
 
 if (config.hasFlag("--config")) {
   const info = config.getConfigInfo();
-  console.log(`⚔️  Excalibur Configuration
+  console.log(`${config.settings.orchestrator.avatar}  Excalibur Configuration
 
 AGENTS CONFIG LOCATIONS (priority order):
  1. ~/.excalibur/agents.json     ${fs.existsSync(info.paths.userConfig) ? "✅ Found" : "❌ Not found"}
@@ -43,7 +43,7 @@ Current config: ${info.currentConfig}
 }
 
 if (config.hasFlag("-h") || config.hasFlag("--help")) {
-  console.log(`⚔️  Excalibur CLI - Multi-agent orchestration with debate and consensus
+  console.log(`${config.settings.orchestrator.avatar}  Excalibur CLI - Multi-agent orchestration with debate and consensus
 📁 Working directory: ${process.cwd()}
 
 USAGE:

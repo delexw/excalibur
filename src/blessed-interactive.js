@@ -461,7 +461,7 @@ export class BlessedInteractive {
 {bold}{cyan-fg}███████╗██╔╝ ██╗╚██████╗██║  ██║███████╗██║██████╔╝╚██████╔╝██║  ██║{/cyan-fg}{/bold}
 {bold}{cyan-fg}╚══════╝╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝╚══════╝╚═╝╚═════╝  ╚═════╝ ╚═╝  ╚═╝{/cyan-fg}{/bold}
 
-{yellow-fg}⚔️  EXCALIBUR CLI - Multi-Agent Debate Engine{/yellow-fg}`;
+{yellow-fg}${this.config.orchestrator.avatar}  EXCALIBUR CLI - Multi-Agent Debate Engine{/yellow-fg}`;
   }
 
   /**
@@ -1674,29 +1674,6 @@ export class BlessedInteractive {
       `{red-fg}🛑 Killing ${processCount} active agent${processCount > 1 ? "s" : ""}...{/red-fg}`,
     );
 
-    // Kill all active child processes more aggressively
-    for (const child of processManager) {
-      if (!child.killed) {
-        try {
-          // First try SIGTERM
-          child.kill("SIGTERM");
-
-          // Immediately follow up with SIGKILL for more reliable termination
-          setTimeout(() => {
-            if (!child.killed) {
-              child.kill("SIGKILL");
-            }
-          }, 100); // Reduced timeout to 100ms for faster termination
-        } catch (error) {
-          // Process might already be dead, ignore errors
-          this.outputBox.log(
-            `{red-fg}Failed to kill process: ${error.message}{/red-fg}`,
-          );
-        }
-      }
-    }
-
-    // Clear the set
     processManager.clear();
 
     // Set interruption flag

@@ -20,6 +20,7 @@ export class Orchestrator {
     this.maxRounds = options.maxRounds || 5;
     this.processManager = options.processManager || null;
     this.agents = options.agents || [];
+    this.orchestrator = options.orchestrator || {};
     this.responseValidator = new ResponseValidator({ 
       logger: this.logger, 
       agents: this.agents,
@@ -45,17 +46,14 @@ export class Orchestrator {
       consensus: this.consensus,
       consensusMode: this.consensusMode,
       owner: this.owner,
+      orchestrator: this.orchestrator,
     });
   }
 
   async run(userQuestion, paint) {
     global.orchestrationInterrupted = false;
 
-    const orchestrator = {
-      id: "orchestrator",
-      displayName: "Orchestrator",
-      avatar: "⚔️",
-    };
+    const orchestrator = this.orchestrator;
 
     this.logger.blockTitle(`Session ${this.logger.session} — ${this.agents.length} agents`);
     this.logger.line(orchestrator, "phase", `Session start - ${this.agents.length} agents`);

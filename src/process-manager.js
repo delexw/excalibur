@@ -14,7 +14,41 @@ export class ProcessManager {
     this.processes.set(agentId, process);
   }
 
+  _killProcesses(signal, agentId = null, timeoutMs = 1000) {
+    const toKill = [];
+
+    const tryKill = (proc, sig) => {
+      try {
+        proc.kill(sig);
+      } catch (err) {
+        // Ignore
+      }
+    };
+
+    for (const [id, proc] of this.processes.entries()) {
+      if (agentId && id !== agentId) continue;
+      if (!proc.killed) {
+        tryKill(proc, signal);
+
+        if (signal === 'SIGTERM') {
+          toKill.push(proc);
+        }
+      }
+    }
+
+    if (toKill.length > 0 && timeoutMs > 0) {
+      setTimeout(() => {
+        for (const proc of toKill) {
+          if (!proc.killed) {
+            tryKill(proc, 'SIGKILL');
+          }
+        }
+      }, timeoutMs);
+    }
+  }
+
   delete(agentId) {
+    this._killProcesses('SIGTERM', agentId);
     this.processes.delete(agentId);
   }
 
@@ -31,6 +65,7 @@ export class ProcessManager {
   }
 
   clear() {
+    this.killAll();
     this.processes.clear();
   }
 
@@ -39,16 +74,7 @@ export class ProcessManager {
   }
 
   killAll(signal = 'SIGTERM') {
-    for (const proc of this.processes.values()) {
-      if (!proc.killed) {
-        try {
-          proc.kill(signal);
-        } catch (err) {
-          // Ignore errors during cleanup
-        }
-      }
-    }
-    this.clear();
+    this._killProcesses(signal);
   }
 
   *[Symbol.iterator]() {

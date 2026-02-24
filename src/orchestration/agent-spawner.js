@@ -177,27 +177,37 @@ export async function spawnAgentProcess(agent, prompt, options = {}) {
       }
     });
 
-    const cleanup = (code) => {
+    let settled = false;
+    let timedOut = false;
+    const settle = (fn, val) => {
+      if (!settled) {
+        settled = true;
+        fn(val);
+      }
+    };
+
+    const cleanup = () => {
       if (processManager instanceof ProcessManager) {
         processManager.delete(agent.id);
       }
-      clearTimeout(timeoutId);
     };
 
     proc.on('close', (code) => {
-      cleanup(code);
-      resolve({ ok: code === 0, output: stdout, error: stderr });
+      if (!timedOut) clearTimeout(timeoutId);
+      cleanup();
+      settle(resolve, { ok: code === 0, output: stdout, error: stderr });
     });
 
     proc.on('error', (err) => {
+      if (!timedOut) clearTimeout(timeoutId);
       cleanup();
-      reject(err);
+      settle(reject, err);
     });
 
     const timeoutId = setTimeout(() => {
-      proc.kill('SIGTERM');
+      timedOut = true;
       cleanup();
-      reject(new Error(`Process killed by timeout after ${timeout}ms`));
+      settle(reject, new Error(`Process killed by timeout after ${timeout}ms`));
     }, timeout);
   });
 }

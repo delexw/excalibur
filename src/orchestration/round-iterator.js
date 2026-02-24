@@ -13,6 +13,7 @@ export class RoundIterator {
     this.consensus = options.consensus || {};
     this.consensusMode = options.consensusMode || "super";
     this.owner = options.owner || {};
+    this.orchestrator = options.orchestrator || {};
 
     this.critiquePhase = new CritiquePhase({
       prompts: this.prompts,
@@ -48,7 +49,7 @@ export class RoundIterator {
   }
 
   async iterate(userQuestion, proposals) {
-    const orchestrator = { id: "orchestrator", displayName: "Orchestrator", avatar: "⚔️" };
+    const orchestrator = this.orchestrator;
 
     for (let round = 1; round <= this.maxRounds; round++) {
       const roundResult = await this.runCritiqueVoteRound(round, userQuestion, proposals);

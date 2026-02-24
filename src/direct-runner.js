@@ -26,6 +26,7 @@ export class DirectRunner {
       maxRounds: this.config.maxRounds,
       processManager: this.processManager,
       agents: this.agents,
+      orchestrator: this.config.orchestrator,
     });
 
     try {

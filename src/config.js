@@ -30,6 +30,10 @@ export class Config {
     };
   }
 
+  getOrchestrator() {
+    return this.settings.orchestrator;
+  }
+
   getPrompts() {
     return this.settings.sysPrompts;
   }
@@ -254,6 +258,11 @@ export class Config {
       color: cfg.color || "white",
       ...cfg,
     }));
+
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = path.dirname(__filename);
+    const ORCHESTRATION_DIR = path.join(__dirname, "orchestration");
+    this.settings.orchestrator = JSON.parse(fs.readFileSync(path.join(ORCHESTRATION_DIR, "orchestrator.json"), "utf8"));
   }
 
   getAgents() {
