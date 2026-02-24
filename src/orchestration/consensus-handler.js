@@ -1,4 +1,7 @@
 import { VoteTallier } from "./vote-tallier.js";
+import { OwnerApprovalHandler } from "./owner-approval-handler.js";
+import { ResponseFormatter } from "./response-formatter.js";
+import { ActionHandler } from "./action-handler.js";
 
 export class ConsensusHandler {
   constructor(options = {}) {
@@ -7,10 +10,19 @@ export class ConsensusHandler {
     this.consensus = options.consensus || {};
     this.consensusMode = options.consensusMode || "super";
     this.maxRounds = options.maxRounds || 5;
-    this.ownerApprovalHandler = options.ownerApprovalHandler || null;
-    this.actionHandler = options.actionHandler || null;
-    this.responseFormatter = options.responseFormatter || null;
+    this.prompts = options.prompts || {};
+    this.agentSpawner = options.agentSpawner || null;
+    this.owner = options.owner || {};
     this.voteTallier = new VoteTallier();
+    this.responseFormatter = new ResponseFormatter({ logger: this.logger });
+    this.ownerApprovalHandler = new OwnerApprovalHandler({ logger: this.logger, owner: this.owner });
+    this.actionHandler = new ActionHandler({
+      logger: this.logger,
+      agents: this.agents,
+      prompts: this.prompts,
+      agentSpawner: this.agentSpawner,
+      responseFormatter: this.responseFormatter,
+    });
   }
 
   async checkConsensus(roundResult, proposals, orchestrator) {

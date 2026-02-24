@@ -1,8 +1,5 @@
 import { CritiquePhase, RevisionPhase, VotePhase } from "./phase-handler.js";
 import { ConsensusHandler } from "./consensus-handler.js";
-import { OwnerApprovalHandler } from "./owner-approval-handler.js";
-import { ResponseFormatter } from "./response-formatter.js";
-import { ActionHandler } from "./action-handler.js";
 
 export class RoundIterator {
   constructor(options = {}) {
@@ -16,16 +13,6 @@ export class RoundIterator {
     this.consensus = options.consensus || {};
     this.consensusMode = options.consensusMode || "super";
     this.owner = options.owner || {};
-
-    this.responseFormatter = new ResponseFormatter({ logger: this.logger });
-    this.ownerApprovalHandler = new OwnerApprovalHandler({ logger: this.logger, owner: this.owner });
-    this.actionHandler = new ActionHandler({
-      logger: this.logger,
-      agents: this.agents,
-      prompts: this.prompts,
-      agentSpawner: this.agentSpawner,
-      responseFormatter: this.responseFormatter,
-    });
 
     this.critiquePhase = new CritiquePhase({
       prompts: this.prompts,
@@ -54,9 +41,9 @@ export class RoundIterator {
       consensus: this.consensus,
       consensusMode: this.consensusMode,
       maxRounds: this.maxRounds,
-      ownerApprovalHandler: this.ownerApprovalHandler,
-      actionHandler: this.actionHandler,
-      responseFormatter: this.responseFormatter,
+      prompts: this.prompts,
+      agentSpawner: this.agentSpawner,
+      owner: this.owner,
     });
   }
 
