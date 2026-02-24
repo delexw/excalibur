@@ -25,7 +25,8 @@ Return a single **strict JSON** object with your revised proposal:
 ```json
 {
   "revised": {
-    "proposal": "<updated proposal or 'no change' if no updates needed>",
+    "is_changed": true|false,
+    "proposal": "<updated proposal or original proposal if no updates needed>",
     "code_patch": "<optional updated diff>",
     "key_points": ["<updated key points>", "…"],
     "assumptions": ["<updated assumptions>", "…"],

@@ -14,7 +14,7 @@ export class AgentSpawner {
     let lastResult;
 
     for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
-      if (this.checkInterruption(agent)) return this.checkInterruption(agent);
+      if (this.checkInterruption()) return this.checkInterruption();
 
       const result = await this.spawnOnce(agent, prompt, timeoutSec, phase);
       lastResult = result;
@@ -42,7 +42,7 @@ export class AgentSpawner {
     return lastResult;
   }
 
-  checkInterruption(agent, returnBoolean = false) {
+  checkInterruption(returnBoolean = false) {
     if (global.orchestrationInterrupted) {
       if (returnBoolean) return true;
       return { ok: false, error: "Interrupted by user", interrupted: true };
@@ -51,7 +51,7 @@ export class AgentSpawner {
   }
 
   async spawnOnce(agent, prompt, timeoutSec, phase = "response") {
-    const interrupted = this.checkInterruption(agent);
+    const interrupted = this.checkInterruption();
     if (interrupted) return interrupted;
 
     if (this.logger?.blessedUI?.setAgentStatus) {
