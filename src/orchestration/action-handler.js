@@ -47,10 +47,10 @@ export class ActionHandler {
     for (const result of okResults) {
       try {
         const json = result.res.json;
-        if (json.agreed) {
+        if (json.is_actionable && json.agreed) {
           agreedCount++;
         } else {
-          disagreedAgents.push({ id: result.agentId, reason: json.reason });
+          disagreedAgents.push({ id: result.agentId, reason: json.is_actionable ? json.reason : "Not actionable" });
         }
       } catch (e) {
         disagreedAgents.push({ id: result.agentId, reason: "Failed to parse response" });
