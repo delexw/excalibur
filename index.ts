@@ -16,7 +16,7 @@ const processManager = getProcessManager();
 global.processManager = processManager;
 global.orchestrationInterrupted = false;
 
-function gracefulShutdown(signal) {
+function gracefulShutdown(signal: string): void {
   console.log(`\nReceived ${signal}. Terminating active processes...`);
   processManager.killAll('SIGTERM');
   process.exit(0);
@@ -76,12 +76,14 @@ OPTIONS:
 
 // ----- Initialize logger ----------------------------------------------------
 const agents = config.getAgents();
+const logDir = config.get('log.dir') as string;
+const logSession = config.get('log.session') as string;
 const LOGGER = new ConversationLogger(
-  config.get('log.dir'),
-  config.get('log.session'),
+  logDir,
+  logSession,
   {
-    noColor: config.get('log.noColor'),
-    quiet: config.get('log.quiet'),
+    noColor: config.get('log.noColor') as boolean,
+    quiet: config.get('log.quiet') as boolean,
     agents,
   }
 );
@@ -110,7 +112,7 @@ async function runInteractiveMode() {
   await interactive.start();
 }
 
-async function runDirectMode(question) {
+async function runDirectMode(question: string): Promise<void> {
   const runner = new DirectRunner({
     logger: LOGGER,
     processManager,

@@ -1,8 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import type { Agent, Orchestrator, Meta, Scorecard, LoggerOptions, BlessedUI, ColorName, FormatTextOptions, HighlightOptions } from './types.js';
 
-// Minimal ANSI colour helper.  Colours can be disabled via the noColor flag in the
-// constructor options.  You can pass an alternate colour palette if desired.
+type Color = ColorName | string;
+
+// Minimal ANSI colour helper.
 export const ANSI = {
   reset: '\x1b[0m',
   bold: '\x1b[1m',
@@ -16,11 +18,11 @@ export const ANSI = {
     gray: '\x1b[90m',
     white: '\x1b[37m',
   },
-  paint(txt, colour, noColor = false) {
-    if (noColor || !ANSI.colors[colour]) return txt;
-    return ANSI.colors[colour] + txt + ANSI.reset;
+  paint(txt: string, colour: Color, noColor = false): string {
+    if (noColor || !ANSI.colors[colour as keyof typeof ANSI.colors]) return txt;
+    return ANSI.colors[colour as keyof typeof ANSI.colors] + txt + ANSI.reset;
   },
-  boldify(txt, noColor = false) {
+  boldify(txt: string, noColor = false): string {
     return noColor ? txt : ANSI.bold + txt + ANSI.reset;
   },
 };
@@ -35,7 +37,7 @@ export const ANSI = {
  * @param {boolean} options.noColor - Disable colors (for ANSI only)
  * @returns {string} Formatted text
  */
-function formatText(text, color = 'white', { bold = false, forBlessed = false, noColor = false } = {}) {
+function formatText(text: string, color: string = 'white', { bold = false, forBlessed = false, noColor = false }: FormatTextOptions = {}): string {
   if (!text) return text;
   if (noColor && !forBlessed) return text;
 
@@ -62,7 +64,7 @@ function formatText(text, color = 'white', { bold = false, forBlessed = false, n
  * @param {string} options.phaseColor - Color for phase label
  * @returns {string} Highlighted text
  */
-function highlightConversation(text, agents, { forBlessed = false, noColor = false, phase = null, phaseColor = 'white' } = {}) {
+function highlightConversation(text: string, agents: Agent[], { forBlessed = false, noColor = false, phase = null, phaseColor = 'white' }: HighlightOptions = {}): string {
   if (!text) return text;
 
   let result = text;
@@ -118,7 +120,15 @@ function highlightConversation(text, agents, { forBlessed = false, noColor = fal
  * supports coloured console output for readability.
  */
 export class ConversationLogger {
-  constructor(baseDir, session, options = {}) {
+  baseDir: string;
+  streams: Map<string, fs.WriteStream>;
+  meta: Meta;
+  noColor: boolean;
+  quiet: boolean;
+  agents: Agent[];
+  blessedUI: BlessedUI | null;
+
+  constructor(baseDir: string, session: string, options: LoggerOptions = {}) {
     const { noColor = false, quiet = false, agents = [], blessedUI = null } = options;
     this.baseDir = path.join(baseDir, session);
     fs.mkdirSync(this.baseDir, { recursive: true });
@@ -130,20 +140,25 @@ export class ConversationLogger {
     this.blessedUI = blessedUI;
   }
 
+  get session(): string {
+    return this.meta.session;
+  }
+
   /**
    * Set the blessed UI instance for output routing
    * @param {Object} blessedUI - BlessedUI instance
    */
-  setBlessedUI(blessedUI) {
+  setBlessedUI(blessedUI: BlessedUI | null): void {
     this.blessedUI = blessedUI;
   }
   // Returns a writable stream for the given agent ID, creating it if needed
-  agentFile(agentId) {
-    if (!this.streams.has(agentId)) {
-      const fp = path.join(this.baseDir, `agent-${agentId}.log`);
-      this.streams.set(agentId, fs.createWriteStream(fp, { flags: 'a' }));
-    }
-    return this.streams.get(agentId);
+  agentFile(agentId: string): fs.WriteStream {
+    const existing = this.streams.get(agentId);
+    if (existing) return existing;
+    const fp = path.join(this.baseDir, `agent-${agentId}.log`);
+    const stream = fs.createWriteStream(fp, { flags: 'a' });
+    this.streams.set(agentId, stream);
+    return stream;
   }
 
 
@@ -155,7 +170,7 @@ export class ConversationLogger {
    * transcript.  The phase describes the stage of the discussion (e.g.
    * "proposal", "critique").
    */
-  line(agent, phase, text, fileOnly = false) {
+  line(agent: Agent | Orchestrator, phase: string, text: string, fileOnly = false): void {
     if (!agent?.id) {
       console.warn('Logger: agent.id is missing, skipping file log');
       return;
@@ -205,12 +220,12 @@ export class ConversationLogger {
    * phases.  The header uses unicode box‑drawing characters and can be
    * disabled via the quiet flag.
    */
-  blockTitle(title) {
+  blockTitle(title: string): void {
     if (this.quiet) return;
 
     if (this.blessedUI) {
       // Send to orchestration log in blessed UI
-      this.blessedUI.setHeaderMessage(`\n━━━ ${title} ━━━\n`);
+      this.blessedUI.setHeaderMessage?.(`\n━━━ ${title} ━━━\n`);
     } else {
       // Normal console output
       const width = Math.max(8, Math.min(80, process.stdout.columns || 80) - 4);
@@ -224,8 +239,8 @@ export class ConversationLogger {
    * includes simple scorecards for each agent.  Scorecards should be
    * calculated by the orchestrator and passed in here.
    */
-  summary(scorecards) {
-    const md = [];
+  summary(scorecards: Scorecard[]): void {
+    const md: string[] = [];
     md.push(`# Session ${this.meta.session}\n`);
     md.push(`Started: ${this.meta.startedAt}\n`);
     md.push(`\n## Scorecards`);
@@ -247,7 +262,7 @@ export class ConversationLogger {
     }
   }
   // Close all file streams
-  end() {
+  end(): void {
     for (const s of this.streams.values()) s.end();
   }
 }

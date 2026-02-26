@@ -6,16 +6,21 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
+import type { Agent, ConfigSettings, SysPrompts, Orchestrator, ConfigPaths, ConfigInfo, ConfigValue, ConsensusConfig } from './types.js';
 
 export class Config {
-  constructor(argv = process.argv.slice(2)) {
+  argv: string[];
+  settings: ConfigSettings;
+  agents: Agent[];
+
+  constructor(argv: string[] = process.argv.slice(2)) {
     this.argv = argv;
     this.settings = this.parse();
     this._loadAgents();
     this._loadPrompts();
   }
 
-  _loadPrompts() {
+  _loadPrompts(): void {
     const __filename = fileURLToPath(import.meta.url);
     const __dirname = path.dirname(__filename);
     const PROMPT_DIR = path.join(__dirname, "..", "prompts");
@@ -38,22 +43,26 @@ export class Config {
     return this.settings.sysPrompts;
   }
 
-  get(key) {
+  get(key: string): ConfigValue {
     const keys = key.split('.');
-    let value = this.settings;
+    let value: ConfigValue = this.settings;
     for (const k of keys) {
-      value = value?.[k];
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        value = (value as ConfigSettings)[k as keyof ConfigSettings] as ConfigValue;
+      } else {
+        return undefined;
+      }
     }
     return value;
   }
 
-  parse() {
-    const numFlag = (name, def) => {
+  parse(): ConfigSettings {
+    const numFlag = (name: string, def: number): number => {
       const v = (this.argv.find((a) => a.startsWith(`--${name}=`)) || "").split("=")[1];
       return v ? Number(v) : def;
     };
 
-    const strFlag = (name, def) => {
+    const strFlag = (name: string, def: string): string => {
       const v = (this.argv.find((a) => a.startsWith(`--${name}=`)) || "").split("=")[1];
       return v || def;
     };
@@ -66,16 +75,13 @@ export class Config {
       team: { unanimousPct: 0.8, superMajorityPct: 0.75, majorityPct: 0.55, requireNoBlockers: true, rubberPenalty: 0.35, responseThreshold: 0.8 },
     };
 
-    // Start with default preset
     let activePreset = { ...PRESETS.default };
 
-    // Apply preset if specified
     const presetName = strFlag("preset", "");
     if (presetName && PRESETS[presetName]) {
       activePreset = { ...PRESETS[presetName] };
     }
 
-    // Override via flags
     activePreset.unanimousPct = numFlag("unanimousPct", activePreset.unanimousPct);
     activePreset.superMajorityPct = numFlag("superMajorityPct", activePreset.superMajorityPct);
     activePreset.majorityPct = numFlag("majorityPct", activePreset.majorityPct);
@@ -86,7 +92,7 @@ export class Config {
     const ownerStr = strFlag("owner", "");
     const ownerIds = ownerStr.trim() ? ownerStr.split(",").map(s => s.trim()).filter(Boolean) : [];
 
-    const config = {
+    const config: ConfigSettings = {
       consensusMode: strFlag("consensus", "super"),
       maxRounds: numFlag("maxRounds", 5),
       consensus: {
@@ -108,24 +114,26 @@ export class Config {
         noColor: this.argv.includes("--no-color"),
         quiet: this.argv.includes("--quiet"),
       },
+      sysPrompts: { propose: "", critique: "", revise: "", vote: "", actionAgree: "", actionExecute: "" },
+      orchestrator: { id: "orchestrator", displayName: "Orchestrator", avatar: "🗂️" },
     };
 
     return config;
   }
 
-  hasFlag(flag) {
+  hasFlag(flag: string): boolean {
     return this.argv.includes(flag);
   }
 
-  getQuestion() {
+  getQuestion(): string | undefined {
     return this.argv.find((a) => !a.startsWith("--"));
   }
 
-  applyRuntime(newConfig) {
+  applyRuntime(newConfig: Partial<ConfigSettings & ConsensusConfig & { allowBlockers: boolean; ownerMode: string; ownerMin: number; owner: string[] }>): ConfigSettings {
     if (!newConfig) return this.settings;
 
-    if (newConfig.consensus) {
-      this.settings.consensusMode = newConfig.consensus;
+    if (newConfig.consensusMode) {
+      this.settings.consensusMode = newConfig.consensusMode;
     }
     if (typeof newConfig.maxRounds === 'number') {
       this.settings.maxRounds = newConfig.maxRounds;
@@ -188,7 +196,7 @@ export class Config {
     throw new Error("Missing agents.json");
   }
 
-  _validateAgents(agents) {
+  _validateAgents(agents: Partial<Agent>[]): void {
     const errors = [];
     const seenIds = new Set();
     const seenDisplayNames = new Set();

@@ -8,10 +8,12 @@
 import { DefaultParser } from './default.js';
 import { CodexParser } from './codex.js';
 import { GeminiParser } from './gemini.js';
+import { BaseParser } from './base.js';
+import type { Agent } from '../types.js';
 
-const parserRegistry = new Map();
+const parserRegistry = new Map<string, new () => BaseParser>();
 
-export function registerParser(name, parserClass) {
+export function registerParser(name: string, parserClass: new () => BaseParser): void {
   parserRegistry.set(name.toLowerCase(), parserClass);
 }
 
@@ -24,7 +26,7 @@ registerParser('gemini', GeminiParser);
  * @param {string} name - Parser name (e.g., 'codex', 'default')
  * @returns {BaseParser} Parser instance
  */
-export function getParser(name) {
+export function getParser(name?: string): BaseParser {
   const ParserClass = parserRegistry.get(name?.toLowerCase());
   if (!ParserClass) {
     return new DefaultParser();
@@ -37,7 +39,7 @@ export function getParser(name) {
  * @param {Object} agent - Agent configuration from agents.json
  * @returns {BaseParser} Parser instance
  */
-export function getParserForAgent(agent) {
+export function getParserForAgent(agent: Agent): BaseParser {
   if (agent.responseParser) {
     return getParser(agent.responseParser);
   }

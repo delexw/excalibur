@@ -1,9 +1,11 @@
 /**
  * Base parser interface for agent output normalization
- * 
+ *
  * Implement this interface to create custom parsers for different agents.
  * Each parser handles the unique output format of specific AI CLI tools.
  */
+
+import type { AgentResponsePayload } from '../types.js';
 
 export class BaseParser {
   /**
@@ -11,7 +13,7 @@ export class BaseParser {
    * @param {string} stdout - Raw stdout from the agent process
    * @returns {string} Normalized JSON text suitable for JSON.parse()
    */
-  parse(stdout) {
+  parse(stdout: string): string {
     throw new Error('Parser must implement parse() method');
   }
 
@@ -20,7 +22,7 @@ export class BaseParser {
    * @param {string} stdout - Raw stdout from the agent process
    * @returns {boolean} True if this parser can handle the output
    */
-  canHandle(stdout) {
+  canHandle(stdout: string): boolean {
     throw new Error('Parser must implement canHandle() method');
   }
 }
@@ -29,7 +31,12 @@ export class BaseParser {
  * Parse result wrapper
  */
 export class ParseResult {
-  constructor({ ok, json, raw, error }) {
+  ok: boolean;
+  json: AgentResponsePayload;
+  raw: string;
+  error?: string;
+
+  constructor({ ok, json, raw, error }: { ok: boolean; json: AgentResponsePayload; raw: string; error?: string }) {
     this.ok = ok;
     this.json = json;
     this.raw = raw;

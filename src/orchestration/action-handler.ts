@@ -1,15 +1,26 @@
+import { DEFAULT_SYS_PROMPTS } from '../types.js';
+import type { ActionHandlerOptions, ConversationLogger, Agent, Orchestrator, AgentSpawner, ResponseFormatter, ActionResult, ParseResult, ProposalPayload, ActionAgreePayload, AgentResponsePayload, SysPrompts } from '../types.js';
+
 export class ActionHandler {
-  constructor(options = {}) {
+  logger: ConversationLogger | null;
+  agents: Agent[];
+  prompts: SysPrompts;
+  agentSpawner: AgentSpawner | null;
+  responseFormatter: ResponseFormatter | null;
+
+  constructor(options: ActionHandlerOptions = {}) {
     this.logger = options.logger || null;
     this.agents = options.agents || [];
-    this.prompts = options.prompts || {};
+    this.prompts = options.prompts || DEFAULT_SYS_PROMPTS;
     this.agentSpawner = options.agentSpawner || null;
     this.responseFormatter = options.responseFormatter || null;
   }
 
-  async checkAgreement(winningPayload, winnerId, orchestrator) {
-    const hasCodePatch = winningPayload.code_patch && winningPayload.code_patch.trim().length > 0;
-    const hasTests = winningPayload.tests && winningPayload.tests.length > 0;
+  async checkAgreement(winningPayload: ProposalPayload, winnerId: string, orchestrator: Agent | Orchestrator): Promise<ActionResult> {
+    const codePatch = winningPayload.code_patch;
+    const tests = winningPayload.tests;
+    const hasCodePatch = codePatch && codePatch.trim().length > 0;
+    const hasTests = tests && tests.length > 0;
 
     if (!hasCodePatch && !hasTests) {
       this.logger.blockTitle("ℹ️ Proposal is informational only - no action needed");
@@ -46,8 +57,10 @@ export class ActionHandler {
 
     for (const result of okResults) {
       try {
-        const json = result.res.json;
-        if (json.is_actionable && json.agreed) {
+        const json = result.res.json as ActionAgreePayload;
+        const isActionable = json.is_actionable;
+        const agreed = json.agreed;
+        if (isActionable && agreed) {
           agreedCount++;
         } else {
           disagreedAgents.push({ id: result.agentId, reason: json.reason });
@@ -81,21 +94,24 @@ export class ActionHandler {
     return { shouldExecute, actionable: true, winnerId, winnerAgent, agreementRate, agreedCount, totalVoters, payload: winningPayload };
   }
 
-  async execute(actionResult, winningPayload, orchestrator) {
+  async execute(actionResult: ActionResult, winningPayload: ProposalPayload, orchestrator: Agent | Orchestrator): Promise<ParseResult> {
     const winnerAgent = actionResult.winnerAgent;
 
     this.logger.line(orchestrator, "action", '🚀 Executing approved action...\n');
 
-    const agent = this.agents.find(a => a.id === winnerAgent.id);
+    const agent = this.agents.find(a => a.id === winnerAgent?.id);
     if (!agent) {
-      this.logger.line(orchestrator, "action", `❌ Agent ${winnerAgent.id} not found`);
-      return;
+      this.logger.line(orchestrator, "action", `❌ Agent ${winnerAgent?.id} not found`);
+      return { ok: false, json: {} as AgentResponsePayload, raw: "Agent not found" };
     }
 
+    const proposal = winningPayload.proposal;
+    const codePatch = winningPayload.code_patch;
+    const tests = winningPayload.tests;
     let prompt = this.prompts.actionExecute || "";
-    prompt = prompt.replace("{{PROPOSAL}}", winningPayload.proposal || "");
-    prompt = prompt.replace("{{CODE_PATCH}}", winningPayload.code_patch ? `\`\`\`\n${winningPayload.code_patch}\n\`\`\`` : "");
-    prompt = prompt.replace("{{TESTS}}", winningPayload.tests && winningPayload.tests.length > 0 ? "Tests to run:\n" + winningPayload.tests.join("\n") : "");
+    prompt = prompt.replace("{{PROPOSAL}}", proposal || "");
+    prompt = prompt.replace("{{CODE_PATCH}}", codePatch ? `\`\`\`\n${codePatch}\n\`\`\`` : "");
+    prompt = prompt.replace("{{TESTS}}", tests && tests.length > 0 ? "Tests to run:\n" + tests.join("\n") : "");
     prompt = prompt.replace("{{CWD}}", process.cwd());
 
     this.logger.line(orchestrator, "action", `Executing agent: ${agent.id} (${agent.displayName})...\n`);

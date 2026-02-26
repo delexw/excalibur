@@ -2,13 +2,16 @@
   "name": "excalibur",
   "version": "0.0.1",
   "description": "Multi-agent orchestration CLI with debate, critique, voting and consensus",
-  "main": "index.js",
+  "main": "dist/index.js",
   "bin": {
-    "excalibur": "./index.js"
+    "excalibur": "dist/index.js"
   },
   "type": "module",
   "scripts": {
-    "start": "node index.js",
+    "build": "tsc",
+    "start": "tsx index.ts",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build",
     "postinstall": "node scripts/postinstall.js --force"
   },
   "keywords": [
@@ -36,9 +39,7 @@
     "node": ">=18"
   },
   "files": [
-    "index.js",
-    "logger.js",
-    "interactive.js",
+    "dist/",
     "agents.json",
     "prompts/",
     "scripts/",
@@ -48,5 +49,10 @@
   "preferGlobal": true,
   "dependencies": {
     "blessed": "^0.1.81"
+  },
+  "devDependencies": {
+    "@types/node": "^25.3.1",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
   }
 }

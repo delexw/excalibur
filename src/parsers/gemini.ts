@@ -12,7 +12,7 @@ export class GeminiParser extends BaseParser {
    * @param {string} stdout - Raw stdout
    * @returns {boolean} True if output contains Gemini markers
    */
-  canHandle(stdout) {
+  canHandle(stdout: string): boolean {
     return stdout.includes('gemini') || stdout.includes('```json');
   }
 
@@ -21,7 +21,7 @@ export class GeminiParser extends BaseParser {
    * @param {string} stdout - Raw stdout from Gemini CLI
    * @returns {string} Normalized JSON text
    */
-  parse(stdout) {
+  parse(stdout: string): string {
     let txt = stdout;
 
     // Strip ANSI escape codes
@@ -59,7 +59,7 @@ export class GeminiParser extends BaseParser {
    * @param {string} text - Text with ANSI codes
    * @returns {string} Clean text
    */
-  _stripAnsi(text) {
+  _stripAnsi(text: string): string {
     return text
       .replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, '')
       .replace(/\x1B\][^\x07]*\x07/g, '')

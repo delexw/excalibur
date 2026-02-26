@@ -13,7 +13,7 @@ export class DefaultParser extends BaseParser {
    * @param {string} stdout - Raw stdout
    * @returns {boolean} Always true - this is the fallback
    */
-  canHandle(stdout) {
+  canHandle(_stdout: string): boolean {
     return true;
   }
 
@@ -22,7 +22,7 @@ export class DefaultParser extends BaseParser {
    * @param {string} stdout - Raw stdout from agent
    * @returns {string} Normalized JSON text
    */
-  parse(stdout) {
+  parse(stdout: string): string {
     let txt = stdout;
 
     // Strip ANSI escape codes
@@ -60,7 +60,7 @@ export class DefaultParser extends BaseParser {
    * @param {string} text - Text with ANSI codes
    * @returns {string} Clean text
    */
-  _stripAnsi(text) {
+  _stripAnsi(text: string): string {
     return text
       .replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, '')
       .replace(/\x1B\][^\x07]*\x07/g, '')

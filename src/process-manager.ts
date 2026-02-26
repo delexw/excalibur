@@ -5,24 +5,27 @@
  * when spawning agent CLI processes across different modules.
  */
 
-import { spawn } from 'node:child_process';
+import { spawn, ChildProcess } from 'node:child_process';
+import type { Agent, SpawnOptions, SpawnResult } from './types.js';
 
 export class ProcessManager {
+  processes: Map<string, ChildProcess>;
+
   constructor() {
     this.processes = new Map();
   }
 
-  add(agentId, process) {
+  add(agentId: string, process: ChildProcess): void {
     this.processes.set(agentId, process);
   }
 
-  _killProcesses(signal, agentId = null, timeoutMs = 1000) {
-    const toKill = [];
+  _killProcesses(signal: string, agentId: string | null = null, timeoutMs = 1000): void {
+    const toKill: ChildProcess[] = [];
 
-    const tryKill = (proc, sig) => {
+    const tryKill = (proc: ChildProcess, sig: string): void => {
       try {
-        proc.kill(sig);
-      } catch (err) {
+        proc.kill(sig as NodeJS.Signals);
+      } catch {
         // Ignore
       }
     };
@@ -49,41 +52,41 @@ export class ProcessManager {
     }
   }
 
-  delete(agentId) {
+  delete(agentId: string): void {
     this._killProcesses('SIGTERM', agentId);
     this.processes.delete(agentId);
   }
 
-  has(agentId) {
+  has(agentId: string): boolean {
     return this.processes.has(agentId);
   }
 
-  get(agentId) {
+  get(agentId: string): ChildProcess | undefined {
     return this.processes.get(agentId);
   }
 
-  get size() {
+  get size(): number {
     return this.processes.size;
   }
 
-  clear() {
+  clear(): void {
     this.killAll();
     this.processes.clear();
   }
 
-  forEach(callback) {
+  forEach(callback: (proc: ChildProcess, id: string) => void): void {
     this.processes.forEach(callback);
   }
 
-  killAll(signal = 'SIGTERM') {
+  killAll(signal = 'SIGTERM'): void {
     this._killProcesses(signal);
   }
 
-  *[Symbol.iterator]() {
+  *[Symbol.iterator](): Generator<ChildProcess> {
     yield* this.processes.values();
   }
 
-  async spawnProcess(agent, prompt, options = {}) {
+  async spawnProcess(agent: Agent, prompt: string, options: SpawnOptions = {}): Promise<SpawnResult> {
     const {
       timeout = agent.timeoutMs || 120000,
       onStdout = null,
@@ -102,7 +105,7 @@ export class ProcessManager {
       let stdout = '';
       let stderr = '';
 
-      proc.stdout.on('data', (data) => {
+      proc.stdout?.on('data', (data: Buffer) => {
         const text = data.toString();
         stdout += text;
         if (onStdout) {
@@ -110,7 +113,7 @@ export class ProcessManager {
         }
       });
 
-      proc.stderr.on('data', (data) => {
+      proc.stderr?.on('data', (data: Buffer) => {
         const text = data.toString();
         stderr += text;
         if (onStderr) {
@@ -120,14 +123,14 @@ export class ProcessManager {
 
       let settled = false;
       let timedOut = false;
-      const settle = (fn, val) => {
+      const settle = <T>(fn: (val: T) => void, val: T): void => {
         if (!settled) {
           settled = true;
           fn(val);
         }
       };
 
-      const cleanup = () => {
+      const cleanup = (): void => {
         this.delete(agent.id);
       };
 

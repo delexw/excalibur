@@ -1,39 +1,46 @@
+import type { ResponseFormatterOptions, ConversationLogger, ActionResult, ParseResult, ProposalPayload, ActionExecutePayload, Agent, Orchestrator } from '../types.js';
+
 export class ResponseFormatter {
-  constructor(options = {}) {
+  logger: ConversationLogger | null;
+
+  constructor(options: ResponseFormatterOptions = {}) {
     this.logger = options.logger || null;
   }
 
-  formatActionResponse(actionResult, winningPayload, executionResult, orchestrator) {
+  formatActionResponse(actionResult: ActionResult, winningPayload: ProposalPayload, executionResult: ParseResult, orchestrator: Agent | Orchestrator): string {
     const winnerAgent = actionResult.winnerAgent;
+    const execPayload = executionResult?.json as ActionExecutePayload;
     const response = {
       status: "action_approved",
       winner: { agent_id: actionResult.winnerId, display_name: winnerAgent?.displayName || actionResult.winnerId, avatar: winnerAgent?.avatar },
       agreement: { agreed: actionResult.agreedCount, total: actionResult.totalVoters, rate: actionResult.agreementRate },
       proposal: winningPayload.proposal,
       action: { type: "execute_agent", agent: { id: winnerAgent?.id, cmd: winnerAgent?.cmd, args: winnerAgent?.args }, code_patch: winningPayload.code_patch || null, tests: winningPayload.tests || [] },
-      execution: { ok: executionResult?.ok || false, output: executionResult?.json || null, error: executionResult?.error || null },
+      execution: { ok: executionResult?.ok || false, output: execPayload || null, error: executionResult?.error || null },
     };
 
     this.logger.blockTitle("🚀 Returning Action Response");
     this.logger.line(orchestrator, "action", JSON.stringify(response, null, 2));
 
-    return response.execution.output?.output || "No output from action execution";
+    return execPayload?.output || "No output from action execution";
   }
 
-  formatFinalAnswer(payload) {
+  formatFinalAnswer(payload: ProposalPayload | undefined): string {
     if (!payload) return "No consensus reached";
-    const sections = [];
+    const sections: string[] = [];
     sections.push(payload.proposal || "(no proposal)");
     if (payload.code_patch) {
       sections.push("", "--- code_patch (unified diff) ---", payload.code_patch);
     }
-    if (payload.tests && payload.tests.length) {
+    const tests = payload.tests;
+    if (tests && tests.length) {
       sections.push("", "Tests to run:");
-      payload.tests.forEach((test) => sections.push(`- ${test}`));
+      tests.forEach((test) => sections.push(`- ${test}`));
     }
-    if (payload.key_points && payload.key_points.length) {
+    const keyPoints = payload.key_points;
+    if (keyPoints && keyPoints.length) {
       sections.push("", "Key points:");
-      payload.key_points.forEach((point) => sections.push(`- ${point}`));
+      keyPoints.forEach((point) => sections.push(`- ${point}`));
     }
     sections.push("", `Confidence: ${payload.confidence || "low"}`);
     return sections.join("\n");

@@ -12,7 +12,7 @@ export class CodexParser extends BaseParser {
    * @param {string} stdout - Raw stdout
    * @returns {boolean} True if output contains Codex markers
    */
-  canHandle(stdout) {
+  canHandle(stdout: string): boolean {
     return stdout.includes('OpenAI Codex') || stdout.includes('codex\n');
   }
 
@@ -21,7 +21,7 @@ export class CodexParser extends BaseParser {
    * @param {string} stdout - Raw stdout from Codex CLI
    * @returns {string} Normalized JSON text
    */
-  parse(stdout) {
+  parse(stdout: string): string {
     let txt = stdout;
 
     // Strip ANSI escape codes
@@ -85,7 +85,7 @@ export class CodexParser extends BaseParser {
    * @param {string} text - Text with ANSI codes
    * @returns {string} Clean text
    */
-  _stripAnsi(text) {
+  _stripAnsi(text: string): string {
     return text
       .replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, '')
       .replace(/\x1B\][^\x07]*\x07/g, '')

@@ -15,6 +15,7 @@
 import blessed from "blessed";
 import { SessionManager } from "./session-manager.js";
 import { DirectRunner } from "./direct-runner.js";
+import type { Agent, ConfigSettings, SessionManager as SessionManagerType, ConversationLogger, ProcessManager, BlessedWidgetOptions, UIModes } from "./types.js";
 
 // Common widget configurations (DRY principle)
 const SCROLLBAR_CONFIG = {
@@ -48,21 +49,21 @@ const COMMON_LOG_CONFIG = {
 
 // Widget factory methods (Factory Pattern)
 class WidgetFactory {
-  static createScrollableLog(options) {
+  static createScrollableLog(options: BlessedWidgetOptions) {
     return blessed.log({
       ...COMMON_LOG_CONFIG,
       ...options,
     });
   }
 
-  static createBox(options) {
+  static createBox(options: BlessedWidgetOptions) {
     return blessed.box({
       tags: true,
       ...options,
     });
   }
 
-  static createInputElement(options) {
+  static createInputElement(options: BlessedWidgetOptions) {
     return blessed.element({
       keys: true,
       vi: false,
@@ -75,13 +76,48 @@ class WidgetFactory {
   }
 }
 
+export interface BlessedInteractiveOptions {
+  sessionManager?: SessionManagerType;
+  logger?: ConversationLogger | null;
+  processManager?: ProcessManager | null;
+  agents?: Agent[];
+  config?: ConfigSettings;
+}
+
 export class BlessedInteractive {
-  constructor(options = {}) {
+  sessionManager: SessionManagerType;
+  logger: ConversationLogger | null;
+  processManager: ProcessManager | null;
+  agents: Agent[];
+  config: ConfigSettings;
+  runner: DirectRunner;
+  screen: ReturnType<typeof blessed.screen> | null = null;
+  inputBox: ReturnType<typeof blessed.element> | null = null;
+  outputBox: ReturnType<typeof blessed.log> | null = null;
+  logoBox: ReturnType<typeof blessed.box> | null = null;
+  statusBar: ReturnType<typeof blessed.box> | null = null;
+  orchestrationBox: ReturnType<typeof blessed.log> | null = null;
+  agentPanes: Map<string, ReturnType<typeof blessed.log>> = new Map();
+  commandHistory: string[] = [];
+  historyIndex: number = -1;
+  commandDropdown: ReturnType<typeof blessed.box> | null = null;
+  UI_MODES: UIModes = {
+    INTERACTIVE: "interactive",
+    ORCHESTRATION: "orchestration",
+  };
+  currentMode: string = "INTERACTIVE";
+  isSubmitting: boolean = false;
+  orchestrationActive: boolean = false;
+  filterInterval: ReturnType<typeof setInterval> | null = null;
+  _cursorBlinkInterval: ReturnType<typeof setInterval> | null = null;
+  _agentAnimations: Map<string, ReturnType<typeof setInterval>> = new Map();
+
+  constructor(options: BlessedInteractiveOptions = {}) {
     this.sessionManager = options.sessionManager || new SessionManager();
     this.logger = options.logger || null;
     this.processManager = options.processManager || null;
     this.agents = options.agents || [];
-    this.config = options.config || {};
+    this.config = options.config || {} as ConfigSettings;
 
     this.runner = new DirectRunner({
       logger: this.logger,
@@ -89,27 +125,6 @@ export class BlessedInteractive {
       agents: this.agents,
       config: this.config,
     });
-
-    this.screen = null;
-    this.inputBox = null;
-    this.outputBox = null;
-    this.logoBox = null;
-    this.statusBar = null;
-    this.orchestrationBox = null;
-
-    this.agentPanes = new Map();
-    this.commandHistory = [];
-    this.historyIndex = -1;
-    this.commandDropdown = null; // For command autocomplete dropdown
-
-    // UI Mode state - use enum pattern for clarity
-    this.UI_MODES = {
-      INTERACTIVE: "interactive",
-      ORCHESTRATION: "orchestration",
-    };
-    this.currentMode = this.UI_MODES.INTERACTIVE;
-    this.isSubmitting = false; // Guard against double submission
-    this.orchestrationActive = false; // Track if orchestration is actively running
   }
 
   /**
@@ -467,10 +482,10 @@ export class BlessedInteractive {
   getStatusText() {
     const config = this.config;
     const ownerInfo =
-      config.owner && config.owner.length > 0
-        ? ` | 👑 Owner: ${config.owner.join(", ")}`
+      config.owner && config.owner.ids && config.owner.ids.length > 0
+        ? ` | 👑 Owner: ${config.owner.ids.join(", ")}`
         : "";
-    return `📁 ${process.cwd()} | ⚖️ Consensus: ${config.consensus} | 🔄 Rounds: ${config.maxRounds} | 🖥️ Interactive UI${ownerInfo} | /help for commands`;
+    return `📁 ${process.cwd()} | ⚖️ Consensus: ${config.consensusMode} | 🔄 Rounds: ${config.maxRounds} | 🖥️ Interactive UI${ownerInfo} | /help for commands`;
   }
 
   /**

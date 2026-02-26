@@ -1,18 +1,28 @@
 import { getParserForAgent } from '../parsers/index.js';
+import type { AgentSpawnerOptions, Agent, ParseResult, ConversationLogger, ProcessManager, AgentResponsePayload, ProposalPayload, CritiqueEntry, FeedbackResponse, ActionAgreePayload, ActionExecutePayload, CritiquePayload, RevisionPayload, VotePayload } from '../types.js';
 
 export class AgentSpawner {
-  constructor(options = {}) {
+  logger: ConversationLogger | null;
+  processManager: ProcessManager | null;
+  maxRetries: number;
+  baseDelay: number;
+
+  constructor(options: AgentSpawnerOptions = {}) {
     this.logger = options.logger || null;
     this.processManager = options.processManager || null;
     this.maxRetries = options.maxRetries || 3;
     this.baseDelay = options.baseDelay || 1000;
   }
 
-  async spawn(agent, prompt, timeoutSec, phase = "response") {
-    let lastResult;
+  async spawn(agent: Agent, prompt: string, timeoutSec: number, phase: string = "response"): Promise<ParseResult> {
+    let lastResult: ParseResult | null = null;
 
     for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
-      if (this.checkInterruption()) return this.checkInterruption();
+      const interruption = this.checkInterruption();
+      if (interruption) {
+        if (interruption === true) continue;
+        return interruption;
+      }
 
       const result = await this.spawnOnce(agent, prompt, timeoutSec, phase);
       lastResult = result;
@@ -40,17 +50,17 @@ export class AgentSpawner {
     return lastResult;
   }
 
-  checkInterruption(returnBoolean = false) {
+  checkInterruption(returnBoolean = false): boolean | ParseResult | null {
     if (global.orchestrationInterrupted) {
       if (returnBoolean) return true;
-      return { ok: false, error: "Interrupted by user", interrupted: true };
+      return { ok: false, error: "Interrupted by user", json: {} as AgentResponsePayload, raw: "" };
     }
     return returnBoolean ? false : null;
   }
 
-  async spawnOnce(agent, prompt, timeoutSec, phase = "response") {
+  async spawnOnce(agent: Agent, prompt: string, timeoutSec: number, phase: string = "response"): Promise<ParseResult> {
     const interrupted = this.checkInterruption();
-    if (interrupted) return interrupted;
+    if (interrupted && interrupted !== true) return interrupted;
 
     if (this.logger?.blessedUI?.setAgentStatus) {
       this.logger.blessedUI.setAgentStatus(agent.id, "running");
@@ -68,7 +78,7 @@ export class AgentSpawner {
       if (this.logger) {
         this.logger.line(agent, "error", `Agent failed: ${err.message}`, true);
       }
-      return { ok: false, error: err.message, raw: "" };
+      return { ok: false, error: err.message, json: {} as AgentResponsePayload, raw: "" };
     }
 
     const parser = getParserForAgent(agent);
@@ -78,7 +88,7 @@ export class AgentSpawner {
         this.logger.line(agent, "response:raw", result.output, true);
       }
       const normalizedJsonText = parser.parse(result.output);
-      const json = JSON.parse(normalizedJsonText);
+      const json = JSON.parse(normalizedJsonText) as AgentResponsePayload;
       if (this.logger) {
         this.logger.line(agent, "response:normalized", JSON.stringify(json, null, 2), true);
         this.logAgentResponse(agent, json, phase);
@@ -93,46 +103,62 @@ export class AgentSpawner {
       if (this.logger?.blessedUI?.setAgentStatus) {
         this.logger.blessedUI.setAgentStatus(agent.id, "failed");
       }
-      return { ok: false, error: `Parse error from ${agent.id}: ${parseErr.message}`, raw: result.output };
+      return { ok: false, error: `Parse error from ${agent.id}: ${parseErr.message}`, json: {} as AgentResponsePayload, raw: result.output };
     }
   }
 
-  logAgentResponse(agent, json, phase) {
+  logAgentResponse(agent: Agent, json: AgentResponsePayload, phase: string): void {
     switch (phase) {
       case "proposal":
-      case "propose":
-        this.logger.line(agent, "proposal", `My proposal: ${json.proposal || "No proposal provided"}`);
+      case "propose": {
+        const payload = json as ProposalPayload;
+        this.logger.line(agent, "proposal", `My proposal: ${payload.proposal || "No proposal provided"}`);
         break;
-      case "critique":
-        for (const c of json.critiques || []) {
+      }
+      case "critique": {
+        const payload = json as CritiquePayload;
+        const critiques: CritiqueEntry[] = payload.critiques || [];
+        for (const c of critiques) {
           if (c.conversation_message) this.logger.line(agent, "critique", c.conversation_message);
         }
-        if (!json.critiques?.length) {
+        if (!critiques.length) {
           this.logger.line(agent, "critique", "The current proposals look solid to me.");
         }
         break;
+      }
       case "revision":
-      case "revise":
-        for (const r of json.response_to_feedback || []) {
+      case "revise": {
+        const payload = json as RevisionPayload;
+        const feedback: FeedbackResponse[] = payload.response_to_feedback || [];
+        for (const r of feedback) {
           if (r.conversation_message) this.logger.line(agent, "revision", r.conversation_message);
         }
         break;
-      case "vote":
-        if (json.conversation_message) {
-          this.logger.line(agent, "vote", json.conversation_message);
+      }
+      case "vote": {
+        const payload = json as VotePayload;
+        const voteMsg = payload.conversation_message;
+        if (voteMsg) {
+          this.logger.line(agent, "vote", voteMsg);
         } else {
           this.logger.line(agent, "error", "Missing conversation_message for vote response");
         }
         break;
-      case "action-agree":
-        const actionAgree = json.action_description || "";
-        const agreed = json.agreed ? "agreed" : "disagreed";
-        const reason = json.reason || "";
+      }
+      case "action-agree": {
+        const payload = json as ActionAgreePayload;
+        const actionAgree = payload.action_description || "";
+        const agreed = payload.agreed ? "agreed" : "disagreed";
+        const reason = payload.reason || "";
         this.logger.line(agent, "action-agree", `[${agreed.toUpperCase()}] ${actionAgree} ${reason ? `- ${reason}` : ''}`);
         break;
-      case "execute":
-        this.logger.line(agent, "execute", json.proposal || json.message || "Action executed");
+      }
+      case "execute": {
+        const payload = json as ActionExecutePayload;
+        const execOutput = payload.output || "Action executed";
+        this.logger.line(agent, "execute", execOutput);
         break;
+      }
     }
   }
 }

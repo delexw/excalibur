@@ -1,5 +1,15 @@
+import type { PhaseHandlerOptions, Agent, PromptBuilder, AgentSpawner, ResponseValidator, RoundResult, Proposal, Critique, PromptContext, CritiquePayload, CritiqueEntry, CritiquePoint, AgentResponsePayload, ReceivedCritique } from '../types.js';
+
 export class PhaseHandler {
-  constructor(options = {}) {
+  agents: Agent[];
+  promptBuilder: PromptBuilder | null;
+  agentSpawner: AgentSpawner | null;
+  responseValidator: ResponseValidator | null;
+  promptTemplate: string;
+  phaseName: string;
+  roundName: string;
+
+  constructor(options: PhaseHandlerOptions = {}) {
     this.agents = options.agents || [];
     this.promptBuilder = options.promptBuilder || null;
     this.agentSpawner = options.agentSpawner || null;
@@ -9,13 +19,13 @@ export class PhaseHandler {
     this.roundName = options.roundName || "Unknown round";
   }
 
-  async run(question, context = {}) {
+  async run(question: string, ..._args: (Proposal[] | Critique[] | PromptContext)[]): Promise<RoundResult> {
     throw new Error("Not implemented");
   }
 }
 
 export class ProposalPhase extends PhaseHandler {
-  constructor(options = {}) {
+  constructor(options: PhaseHandlerOptions = {}) {
     super({
       ...options,
       promptTemplate: options.prompts?.propose || "",
@@ -24,10 +34,10 @@ export class ProposalPhase extends PhaseHandler {
     });
   }
 
-  async run(question, context = {}) {
+  async run(question: string, context: PromptContext = {}): Promise<RoundResult> {
     const prompt = this.promptBuilder.build(this.promptTemplate, question, context, this.agents);
     const results = await Promise.all(
-      this.agents.map(async (a) => {
+      this.agents.map(async (a: Agent) => {
         const res = await this.agentSpawner.spawn(a, prompt, 300, this.phaseName);
         return { agentId: a.id, res };
       }),
@@ -42,7 +52,7 @@ export class ProposalPhase extends PhaseHandler {
 }
 
 export class CritiquePhase extends PhaseHandler {
-  constructor(options = {}) {
+  constructor(options: PhaseHandlerOptions = {}) {
     super({
       ...options,
       promptTemplate: options.prompts?.critique || "",
@@ -51,11 +61,11 @@ export class CritiquePhase extends PhaseHandler {
     });
   }
 
-  async run(question, proposals) {
+  async run(question: string, proposals: Proposal[]): Promise<RoundResult> {
     const results = await Promise.all(
       this.agents.map(async (a) => {
         const otherProposals = proposals.filter(p => p.agentId !== a.id);
-        const context = { current_proposals: otherProposals };
+        const context: PromptContext = { current_proposals: otherProposals };
         const prompt = this.promptBuilder.build(this.promptTemplate, question, context, this.agents);
         const res = await this.agentSpawner.spawn(a, prompt, 300, this.phaseName);
         return { agentId: a.id, res };
@@ -71,7 +81,7 @@ export class CritiquePhase extends PhaseHandler {
 }
 
 export class RevisionPhase extends PhaseHandler {
-  constructor(options = {}) {
+  constructor(options: PhaseHandlerOptions = {}) {
     super({
       ...options,
       promptTemplate: options.prompts?.revise || "",
@@ -80,17 +90,21 @@ export class RevisionPhase extends PhaseHandler {
     });
   }
 
-  async run(question, proposals, critiques) {
-    const critiqueMap = new Map(critiques.map((c) => [c.agentId, c.res?.json?.critiques || []]));
+  async run(question: string, proposals: Proposal[], critiques: Critique[]): Promise<RoundResult> {
+    const critiqueMap = new Map(critiques.map((c) => {
+      const json = c.res?.json as CritiquePayload | undefined;
+      const crits: CritiqueEntry[] = json?.critiques || [];
+      return [c.agentId, crits] as const;
+    }));
 
     const results = await Promise.all(
       this.agents.map(async (a) => {
         const originalProposal = proposals.find((p) => p.agentId === a.id);
         if (!originalProposal) {
-          return { agentId: a.id, res: { ok: false, error: "No proposal found for agent" } };
+          return { agentId: a.id, res: { ok: false, error: "No proposal found for agent", json: {} as AgentResponsePayload, raw: "" } };
         }
 
-        const receivedCritiques = [];
+        const receivedCritiques: ReceivedCritique[] = [];
         for (const [criticId, critsForThisAgent] of critiqueMap) {
           const receivedCritiquesForThisAgent = critsForThisAgent.filter((c) => c.target_agent === a.id);
           for (const crit of receivedCritiquesForThisAgent) {
@@ -98,7 +112,7 @@ export class RevisionPhase extends PhaseHandler {
           }
         }
 
-        const context = { your_proposal: originalProposal.payload, critiques_received: receivedCritiques };
+        const context: PromptContext = { your_proposal: originalProposal.payload, critiques_received: receivedCritiques };
         const prompt = this.promptBuilder.build(this.promptTemplate, question, context, this.agents);
         const res = await this.agentSpawner.spawn(a, prompt, 300, this.phaseName);
         return { agentId: a.id, res };
@@ -114,7 +128,7 @@ export class RevisionPhase extends PhaseHandler {
 }
 
 export class VotePhase extends PhaseHandler {
-  constructor(options = {}) {
+  constructor(options: PhaseHandlerOptions = {}) {
     super({
       ...options,
       promptTemplate: options.prompts?.vote || "",
@@ -123,8 +137,8 @@ export class VotePhase extends PhaseHandler {
     });
   }
 
-  async run(question, proposals) {
-    const context = { current_proposals: proposals };
+  async run(question: string, proposals: Proposal[]): Promise<RoundResult> {
+    const context: PromptContext = { current_proposals: proposals };
     const prompt = this.promptBuilder.build(this.promptTemplate, question, context, this.agents);
     const results = await Promise.all(
       this.agents.map(async (a) => {

@@ -6,17 +6,31 @@
 
 import { Orchestrator } from './orchestration.js';
 import { ANSI } from './logger.js';
+import type { Agent, ConfigSettings, ConversationLogger, ProcessManager, DirectRunnerResult } from './types.js';
+
+interface DirectRunnerOptions {
+  logger?: ConversationLogger | null;
+  processManager?: ProcessManager | null;
+  agents?: Agent[];
+  config?: ConfigSettings;
+}
 
 export class DirectRunner {
-  constructor(options = {}) {
+  logger: ConversationLogger | null;
+  processManager: ProcessManager | null;
+  agents: Agent[];
+  config: ConfigSettings;
+  noColor: boolean;
+
+  constructor(options: DirectRunnerOptions = {}) {
     this.logger = options.logger || null;
     this.processManager = options.processManager || null;
     this.agents = options.agents || [];
-    this.config = options.config || {};
+    this.config = options.config || {} as ConfigSettings;
     this.noColor = this.config.log?.noColor || false;
   }
 
-  async run(question) {
+  async run(question: string): Promise<DirectRunnerResult> {
     const orchestrator = new Orchestrator({
       logger: this.logger,
       prompts: this.config.sysPrompts,
@@ -38,15 +52,15 @@ export class DirectRunner {
     }
   }
 
-  paint(txt, colour) {
+  paint(txt: string, colour: string): string {
     return ANSI.paint(txt, colour, this.noColor);
   }
 
-  handleError(error) {
+  handleError(error: Error): void {
     console.error("Orchestration failed:", error.message);
     if (this.logger) {
       this.logger.line(
-        { id: "orchestrator", displayName: "Orchestrator", color: "red" },
+        this.config.orchestrator,
         "error",
         `Orchestration failed: ${error.message}`,
       );
