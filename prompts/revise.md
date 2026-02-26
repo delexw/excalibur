@@ -22,30 +22,7 @@ Return a single **strict JSON** object with your revised proposal:
 - Example: `"psql -c \"\\\\copy table FROM 'file.csv'\""` (four backslashes become two in final JSON)
 - **NEVER** wrap your response in ```json code blocks - return pure JSON only
 
-```json
-{
-  "revised": {
-    "is_changed": true|false,
-    "proposal": "<updated proposal or original proposal if no updates needed>",
-    "code_patch": "<optional updated diff>",
-    "key_points": ["<updated key points>", "…"],
-    "assumptions": ["<updated assumptions>", "…"],
-    "risks": ["<updated risks>", "…"],
-    "tests": ["<updated tests>", "…"],
-    "citations": ["<updated citations>", "…"],
-    "confidence": "<low|medium|high>"
-  },
-  "response_to_feedback": [
-    {
-      "critic_agent": "<exact agent id from the <agents> list above - never your own id>",
-      "feedback_accepted": "<brief description of valid feedback you incorporated>",
-      "feedback_rejected": "<brief description of feedback you rejected and why>",
-      "action_taken": "<'revised' if you changed your proposal, 'rejected' if you disagreed with their feedback>",
-      "conversation_message": "<natural human-like response to the critic that reflects the action_taken and incorporates feedback_accepted/feedback_rejected details. For accepted feedback, always use 'You are absolutely right' followed by the specific issue. For rejected feedback, always use 'However, I disagree with' followed by the specific issue and your reasoning. Example: '>Agent Display Name, you are absolutely right about the error handling issue - COPY does fail completely on bad data. I have updated my proposal to include validation. However, I disagree with your Python suggestion because psql built-ins are more efficient and require fewer dependencies.'>"
-    }
-  ]
-}
-```
+{{JSON_SCHEMA}}
 
 ## Guidelines
 

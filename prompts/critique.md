@@ -22,27 +22,7 @@ Return a single **strict JSON** object containing only critiques of other agents
 - Example: `"psql -c \"\\\\copy table FROM 'file.csv'\""` (four backslashes become two in final JSON)
 - **NEVER** wrap your response in ```json code blocks - return pure JSON only
 
-```json
-{
-  "critiques": [
-    {
-      "target_agent": "<exact agent id from the <agents> list above - never your own id>",
-      "points": [
-        {
-          "claim_or_line": "<short quote or pointer to the offending text>",
-          "severity": "<minor|major|blocker>",
-          "rationale": "<why this point is wrong, risky or incomplete>",
-          "evidence": ["<links or short facts supporting your critique>", "…"],
-          "suggested_fix": "<concise correction or alternative approach>"
-        }
-        /* additional critique points for the same agent */
-      ],
-      "conversation_message": "<natural human-like message addressing the target agent that incorporates ALL the critique points above. Reference multiple claims if needed, and provide a comprehensive response with bullet points and line breaks for readability. Example: '>Agent Display Name, I have several concerns about your approach:\n\n• Regarding \"your streaming approach\" - COPY will abort on first bad row because PostgreSQL doesn't handle errors gracefully\n• About \"batch processing\" - this could lead to memory issues with large datasets\n\nMy suggestions: implement a validation layer before COPY and consider chunked processing with intermediate commits.'>"
-    }
-    /* additional critique objects for other agents */
-  ]
-}
-```
+{{JSON_SCHEMA}}
 
 ## Guidelines
 

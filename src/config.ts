@@ -7,6 +7,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import type { Agent, ConfigSettings, SysPrompts, Orchestrator, ConfigPaths, ConfigInfo, ConfigValue, ConsensusConfig } from './types.js';
+import { generateJsonSchema } from '../prompts/schema-hints.js';
 
 export class Config {
   argv: string[];
@@ -24,14 +25,19 @@ export class Config {
     const __filename = fileURLToPath(import.meta.url);
     const __dirname = path.dirname(__filename);
     const PROMPT_DIR = path.join(__dirname, "..", "prompts");
-    
+
+    const load = (file: string, schemaKey: string): string => {
+      const raw = fs.readFileSync(path.join(PROMPT_DIR, file), "utf8").trim();
+      return raw.replace(/\{\{JSON_SCHEMA\}\}/g, generateJsonSchema(schemaKey));
+    };
+
     this.settings.sysPrompts = {
-      propose: fs.readFileSync(path.join(PROMPT_DIR, "propose.md"), "utf8").trim(),
-      critique: fs.readFileSync(path.join(PROMPT_DIR, "critique.md"), "utf8").trim(),
-      revise: fs.readFileSync(path.join(PROMPT_DIR, "revise.md"), "utf8").trim(),
-      vote: fs.readFileSync(path.join(PROMPT_DIR, "vote.md"), "utf8").trim(),
-      actionAgree: fs.readFileSync(path.join(PROMPT_DIR, "action-agree.md"), "utf8").trim(),
-      actionExecute: fs.readFileSync(path.join(PROMPT_DIR, "action-execute.md"), "utf8").trim(),
+      propose: load("propose.md", "propose"),
+      critique: load("critique.md", "critique"),
+      revise: load("revise.md", "revise"),
+      vote: load("vote.md", "vote"),
+      actionAgree: load("action-agree.md", "actionAgree"),
+      actionExecute: load("action-execute.md", "actionExecute"),
     };
   }
 

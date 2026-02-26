@@ -15,15 +15,7 @@ The winning proposal is from agent: **{{WINNER_AGENT}}**
 
 Return a **strict JSON** object:
 
-```json
-{
-  "is_actionable": true|false,
-  "action_type": "code_execution|command_run|patch_apply|info_only",
-  "action_description": "<what action will be taken in PLAIN ENGLISH>",
-  "agreed": true|false,
-  "reason": "<your reasoning for agreeing or disagreeing with the action>"
-}
-```
+{{JSON_SCHEMA}}
 
 ## Guidelines
 

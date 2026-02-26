@@ -18,18 +18,7 @@ Return a single **strict JSON** object with the following fields.  The values in
 - Example: `"psql -c \"\\\\copy table FROM 'file.csv'\""` (four backslashes become two in final JSON)
 - **NEVER** wrap your response in ```json code blocks - return pure JSON only
 
-```json
-{
-  "proposal": "<3–8 sentences or concise bullets in PLAIN ENGLISH>",
-  "code_patch": "<optional unified diff as a single string>",
-  "key_points": ["<1–6 bullets summarising the core reasoning in PLAIN ENGLISH>"],
-  "assumptions": ["<explicit assumptions made in PLAIN ENGLISH>", "…"],
-  "risks": ["<likely failure modes or trade‑offs in PLAIN ENGLISH>", "…"],
-  "tests": ["<shell commands or steps to validate your proposal in PLAIN ENGLISH>", "…"],
-  "citations": ["<optional citations or sources in PLAIN ENGLISH>", "…"],
-  "confidence": "<low|medium|high>"
-}
-```
+{{JSON_SCHEMA}}
 
 ## Guidelines
 

@@ -20,25 +20,7 @@ Respond with a single **strict JSON** object:
 - Example: `"psql -c \"\\\\copy table FROM 'file.csv'\""` (four backslashes become two in final JSON)
 - **NEVER** wrap your response in ```json code blocks - return pure JSON only
 
-```json
-{
-  "scores": [
-    { "agent_id": "<exact agent id from the <agents> list above - never your own id>", "score": 0.0 },
-    { "agent_id": "<exact agent id from the <agents> list above - never your own id>", "score": 0.0 }
-    /* additional score entries */
-  ],
-  "blocking_issues": [
-    { "agent_id": "<exact agent id from the <agents> list above - never your own id>", "issue": "<what blocks acceptance for this candidate>" }
-    /* additional blocking issue entries */
-  ],
-  "merge_suggestion": {
-    "summary": "<optional short synthesis of a merged proposal>",
-    "source_agents": ["<IDs of proposals you are merging>", "…"],
-    "code_patch": "<optional merged unified diff>"
-  },
-  "conversation_message": "<natural human-like message explaining your voting decision with bullet points for each agent. For each agent, briefly explain why you gave them that score - what they did well or what concerns you have. Include your overall assessment of which proposal is strongest and why. Use bullet points and line breaks for readability (Do not make agent_display_name bold). Example: 'My ratings:\n\n• >Agent Display Name (0.85) - excellent error handling and safety checks\n• >Another Agent Name (0.72) - solid approach but missing edge case validation  \n• >Third Agent Name (0.65) - innovative but the streaming method could fail on malformed data\n\nOverall, I think the first agent's proposal is strongest because it prioritizes data integrity.'>"
-}
-```
+{{JSON_SCHEMA}}
 
 ## Guidelines
 
