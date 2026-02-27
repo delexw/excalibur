@@ -27,12 +27,12 @@
 
 ### Interactive Mode (Default)
 ```bash
-node index.js
+npm start
 ```
 
 ### Command Line Mode
 ```bash
-node index.js "Your question here" --preset=team --consensus=super --maxRounds=5
+npm start -- "Your question here" --preset=team --consensus=super --maxRounds=5
 ```
 
 ### Interactive Commands
@@ -78,7 +78,7 @@ npm install -g .
 ```
 Then
 ```bash
-excalibur "Explain how to stream large CSVs into Postgres safely." --preset=team --consensus=super --maxRounds=5
+excalibur "Explain how to stream large CSVs into Postgres safely" --preset=team --consensus=super --maxRounds=5
 ```
 
 
@@ -133,13 +133,13 @@ The owner approval system adds an additional quality gate after consensus is rea
 
 ```bash
 # Require Claude to approve the winner with at least 0.8 score
-node index.js "Your question" --owner=claude --ownerMin=0.8
+npm start -- "Your question" --owner=claude --ownerMin=0.8
 
 # Require both Claude and Gemini to approve (all mode)
-node index.js "Your question" --owner=claude,gemini --ownerMode=all --ownerMin=0.85
+npm start -- "Your question" --owner=claude,gemini --ownerMode=all --ownerMin=0.85
 
 # Interactive mode: Configure via settings and save to config
-node index.js
+npm start
 # Use /config command to set owner preferences
 ```
 
